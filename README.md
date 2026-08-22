@@ -8,7 +8,7 @@ orders.
 
 ## Current development stage
 
-**Stage 0 — project skeleton and typed domain contracts.**
+**Stage 1A — Binance crypto market data foundation.**
 
 What exists today:
 
@@ -16,16 +16,79 @@ What exists today:
 - strongly typed enums (`app/core/enums`)
 - Pydantic v2 domain contracts (`app/core/models`)
 - trading cycle configuration contract (`app/core/config`)
-- pytest suite covering the validation rules of those contracts
+- provider-agnostic market data layer with a Binance adapter
+  (`app/market_data`)
+- pytest suite covering the validation rules of those contracts and the whole
+  market data layer against mocked HTTP responses
 
 What deliberately does **not** exist yet:
 
-- market data fetching, indicators, strategies
-- exchange APIs, broker APIs, MT5 integration
+- indicators, strategies, signals, backtesting
+- broker APIs, MT5 integration, order execution
 - LLM agents, supervisors, orchestration
 - databases, HTTP API, lot sizing, performance calculations
 
 No fake or sample market data is shipped with the project.
+
+## Market data (Stage 1A)
+
+- **Binance is the first market data provider.** Binance Spot only.
+- **The core stays provider-agnostic.** Application code depends on the
+  `MarketDataProvider` protocol (`app/market_data/protocols.py`) and on the
+  domain models, never on Binance. Adding a second venue means adding a
+  subpackage under `app/market_data/providers`, nothing else.
+- **Public REST market data only** — ticker price, book ticker, klines and
+  exchange info.
+- **No API key is required.** Nothing is signed and no private endpoint is
+  called.
+- **Real-time WebSocket streaming comes in a later stage.** Every read is a
+  request/response snapshot today.
+- **Futures-specific data is not implemented**: no funding rates, no open
+  interest, no liquidations, no deep order-book analysis.
+- Adapters do no business logic: no indicators, no direction inference, no
+  sizing.
+
+Provider contract:
+
+| Method | Returns |
+| --- | --- |
+| `get_current_price(symbol)` | `PriceQuote` |
+| `get_bid_ask(symbol)` | `BidAskQuote` |
+| `get_ohlcv(symbol, timeframe, limit)` | `list[OHLCVCandle]` |
+| `get_instrument_metadata(symbol)` | `InstrumentMetadata` |
+
+Request path: **client** (HTTP only) → **mapper** (normalization) →
+**`DataQualityValidator`** (verdict) → **domain models**.
+
+Symbols exercised in this stage: `BTCUSDT`, `ETHUSDT`, `XRPUSDT`.
+Timeframes mapped to Binance intervals:
+
+| Internal | Binance |
+| --- | --- |
+| `M5` | `5m` |
+| `M15` | `15m` |
+| `H1` | `1h` |
+| `H4` | `4h` |
+| `D1` | `1d` |
+
+Any other timeframe raises `UnsupportedTimeframeError` before a request is
+made. Every failure that leaves the provider is a `MarketDataError` subclass
+(`ProviderUnavailableError`, `InvalidProviderResponseError`,
+`UnsupportedTimeframeError`, `UnknownSymbolError`); `httpx` exceptions never
+escape the client.
+
+`DataQualityValidator` is deterministic and never repairs data. It detects
+empty results, unordered candles, duplicate timestamps, a stale latest candle,
+a crossed or negative bid/ask, and a response describing the wrong symbol. The
+Binance adapter aborts on an invalid verdict and logs a warning for data that
+is merely stale.
+
+Optional live check (needs internet, not part of `pytest`):
+
+```bash
+python scripts/check_binance_market_data.py
+python scripts/check_binance_market_data.py --symbol ETHUSDT --candles 3
+```
 
 ## Architecture principles
 
@@ -120,12 +183,15 @@ Session state is expressed by `TradingSessionStatus`: `ACTIVE`,
 ```
 app/
   core/          enums, domain models, configuration contracts
-  market_data/   fetchers and data validators
+  market_data/   provider protocol, quality validator, provenance
+    providers/
+      binance/   public Spot REST client, mapper, adapter
   markets/       us, eu, fx, crypto, metals, energies
   technical/     flow/  context/  regime/  strategies/
   risk/          money_management/  diversification/
   decision/      judge/  execution/
   mt5/           statistics/  evaluation/  orchestration/
+scripts/         manual live checks (not part of the test suite)
 tests/
 ```
 
