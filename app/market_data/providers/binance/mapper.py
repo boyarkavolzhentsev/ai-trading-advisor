@@ -2,18 +2,18 @@
 
 Pure functions only: no HTTP, no decisions, no business logic. Anything that
 does not fit the expected shape raises ``InvalidProviderResponseError`` instead
-of being guessed at or repaired.
+of being guessed at or repaired. Generic payload parsing lives in
+``app.market_data.parsing``; this module holds only what is specific to
+Binance's field names and vocabulary.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
-from typing import Any, TypeVar
-
-from pydantic import BaseModel, ValidationError
+from datetime import datetime
+from decimal import Decimal
+from typing import Any
 
 from app.core.enums.instrument import InstrumentStatus
 from app.core.enums.market import Timeframe
@@ -24,6 +24,16 @@ from app.market_data.exceptions import (
     InvalidProviderResponseError,
     UnknownSymbolError,
     UnsupportedTimeframeError,
+)
+from app.market_data.parsing import (
+    as_decimal,
+    as_mapping,
+    as_optional_decimal,
+    as_str,
+    build,
+    normalize_symbol,
+    timestamp_from_millis,
+    to_decimal,
 )
 from app.market_data.providers.binance.constants import (
     INSTRUMENT_STATUSES,
@@ -36,8 +46,6 @@ from app.market_data.providers.binance.constants import (
 
 KLINE_MIN_FIELDS = 6
 """open time, open, high, low, close, volume — the fields this stage uses."""
-
-ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,29 +78,17 @@ def to_binance_interval(timeframe: Timeframe) -> str:
         ) from exc
 
 
-def normalize_symbol(symbol: str) -> str:
-    """Return the Binance spelling of ``symbol`` (upper case, no whitespace).
-
-    Raises:
-        UnknownSymbolError: if the symbol is empty.
-    """
-    normalized = symbol.strip().upper()
-    if not normalized:
-        raise UnknownSymbolError("symbol must not be empty")
-    return normalized
-
-
 def map_price_quote(payload: Any, *, source: str, fetched_at: datetime) -> PriceQuote:
     """Map a ``/ticker/price`` payload onto ``PriceQuote``.
 
     The endpoint reports no timestamp, so the fetch time is used.
     """
-    body = _as_mapping(payload, "ticker price")
-    return _build(
+    body = as_mapping(payload, "ticker price")
+    return build(
         PriceQuote,
         "ticker price",
-        symbol=_as_str(body, "symbol", "ticker price"),
-        price=_as_decimal(body, "price", "ticker price"),
+        symbol=as_str(body, "symbol", "ticker price"),
+        price=as_decimal(body, "price", "ticker price"),
         timestamp=fetched_at,
         source=source,
     )
@@ -100,13 +96,13 @@ def map_price_quote(payload: Any, *, source: str, fetched_at: datetime) -> Price
 
 def normalize_book_ticker(payload: Any) -> NormalizedBookTicker:
     """Parse a ``/ticker/bookTicker`` payload into normalized primitives."""
-    body = _as_mapping(payload, "book ticker")
+    body = as_mapping(payload, "book ticker")
     return NormalizedBookTicker(
-        symbol=_as_str(body, "symbol", "book ticker"),
-        bid=_as_decimal(body, "bidPrice", "book ticker"),
-        ask=_as_decimal(body, "askPrice", "book ticker"),
-        bid_quantity=_as_optional_decimal(body, "bidQty", "book ticker"),
-        ask_quantity=_as_optional_decimal(body, "askQty", "book ticker"),
+        symbol=as_str(body, "symbol", "book ticker"),
+        bid=as_decimal(body, "bidPrice", "book ticker"),
+        ask=as_decimal(body, "askPrice", "book ticker"),
+        bid_quantity=as_optional_decimal(body, "bidQty", "book ticker"),
+        ask_quantity=as_optional_decimal(body, "askQty", "book ticker"),
     )
 
 
@@ -117,7 +113,7 @@ def to_bid_ask_quote(
     fetched_at: datetime,
 ) -> BidAskQuote:
     """Build the domain quote from an already validated book ticker."""
-    return _build(
+    return build(
         BidAskQuote,
         "book ticker",
         symbol=ticker.symbol,
@@ -152,15 +148,15 @@ def map_klines(payload: Any) -> list[OHLCVCandle]:
                 f"klines row {index} has {len(row)} fields, expected at least {KLINE_MIN_FIELDS}"
             )
         candles.append(
-            _build(
+            build(
                 OHLCVCandle,
                 f"klines row {index}",
-                timestamp=_timestamp_from_millis(row[0], f"klines row {index} open time"),
-                open=_to_decimal(row[1], f"klines row {index} open"),
-                high=_to_decimal(row[2], f"klines row {index} high"),
-                low=_to_decimal(row[3], f"klines row {index} low"),
-                close=_to_decimal(row[4], f"klines row {index} close"),
-                volume=_to_decimal(row[5], f"klines row {index} volume"),
+                timestamp=timestamp_from_millis(row[0], f"klines row {index} open time"),
+                open=to_decimal(row[1], f"klines row {index} open"),
+                high=to_decimal(row[2], f"klines row {index} high"),
+                low=to_decimal(row[3], f"klines row {index} low"),
+                close=to_decimal(row[4], f"klines row {index} close"),
+                volume=to_decimal(row[5], f"klines row {index} volume"),
             )
         )
     return candles
@@ -169,7 +165,7 @@ def map_klines(payload: Any) -> list[OHLCVCandle]:
 def extract_server_time(payload: Any) -> datetime | None:
     """Return ``serverTime`` from an ``/exchangeInfo`` payload if present."""
     if isinstance(payload, Mapping) and "serverTime" in payload:
-        return _timestamp_from_millis(payload["serverTime"], "exchange info server time")
+        return timestamp_from_millis(payload["serverTime"], "exchange info server time")
     return None
 
 
@@ -186,7 +182,7 @@ def map_instrument_metadata(
         UnknownSymbolError: if the payload describes no such symbol.
         InvalidProviderResponseError: if the entry or its filters are unusable.
     """
-    body = _as_mapping(payload, "exchange info")
+    body = as_mapping(payload, "exchange info")
     entries = body.get("symbols")
     if not isinstance(entries, Sequence) or isinstance(entries, str | bytes):
         raise InvalidProviderResponseError("exchange info payload has no 'symbols' list")
@@ -211,23 +207,23 @@ def map_instrument_metadata(
         )
     notional_filter = filters.get(NOTIONAL_FILTER) or filters.get(MIN_NOTIONAL_FILTER) or {}
 
-    tick_size = _as_decimal(price_filter, "tickSize", f"{PRICE_FILTER} of {symbol}")
-    step_size = _as_decimal(lot_filter, "stepSize", f"{LOT_SIZE_FILTER} of {symbol}")
+    tick_size = as_decimal(price_filter, "tickSize", f"{PRICE_FILTER} of {symbol}")
+    step_size = as_decimal(lot_filter, "stepSize", f"{LOT_SIZE_FILTER} of {symbol}")
 
-    return _build(
+    return build(
         InstrumentMetadata,
         f"exchange info for {symbol}",
-        symbol=_as_str(entry, "symbol", f"exchange info for {symbol}"),
-        base_asset=_as_str(entry, "baseAsset", f"exchange info for {symbol}"),
-        quote_asset=_as_str(entry, "quoteAsset", f"exchange info for {symbol}"),
+        symbol=as_str(entry, "symbol", f"exchange info for {symbol}"),
+        base_asset=as_str(entry, "baseAsset", f"exchange info for {symbol}"),
+        quote_asset=as_str(entry, "quoteAsset", f"exchange info for {symbol}"),
         status=_map_status(entry.get("status")),
         tick_size=tick_size,
         price_precision=_precision_of(tick_size),
         step_size=step_size,
         quantity_precision=_precision_of(step_size),
-        min_quantity=_as_optional_decimal(lot_filter, "minQty", f"{LOT_SIZE_FILTER} of {symbol}"),
-        max_quantity=_as_optional_decimal(lot_filter, "maxQty", f"{LOT_SIZE_FILTER} of {symbol}"),
-        min_notional=_as_optional_decimal(notional_filter, "minNotional", f"notional of {symbol}"),
+        min_quantity=as_optional_decimal(lot_filter, "minQty", f"{LOT_SIZE_FILTER} of {symbol}"),
+        max_quantity=as_optional_decimal(lot_filter, "maxQty", f"{LOT_SIZE_FILTER} of {symbol}"),
+        min_notional=as_optional_decimal(notional_filter, "minNotional", f"notional of {symbol}"),
         source=source,
         timestamp=extract_server_time(body) or fetched_at,
     )
@@ -258,72 +254,6 @@ def _precision_of(step: Decimal) -> int:
     if not isinstance(exponent, int):  # NaN / Infinity
         raise InvalidProviderResponseError(f"step size {step} is not a finite number")
     return max(0, -exponent)
-
-
-def _as_mapping(payload: Any, context: str) -> Mapping[str, Any]:
-    if not isinstance(payload, Mapping):
-        raise InvalidProviderResponseError(
-            f"{context} payload must be an object, got {type(payload).__name__}"
-        )
-    return payload
-
-
-def _as_str(body: Mapping[str, Any], key: str, context: str) -> str:
-    value = body.get(key)
-    if not isinstance(value, str) or not value.strip():
-        raise InvalidProviderResponseError(f"{context} has no usable {key!r} field")
-    return value.strip()
-
-
-def _as_decimal(body: Mapping[str, Any], key: str, context: str) -> Decimal:
-    if key not in body:
-        raise InvalidProviderResponseError(f"{context} is missing field {key!r}")
-    return _to_decimal(body[key], f"{context} field {key!r}")
-
-
-def _as_optional_decimal(body: Mapping[str, Any], key: str, context: str) -> Decimal | None:
-    if body.get(key) is None:
-        return None
-    return _to_decimal(body[key], f"{context} field {key!r}")
-
-
-def _to_decimal(value: Any, context: str) -> Decimal:
-    """Convert a Binance numeric string into an exact Decimal."""
-    if isinstance(value, bool) or not isinstance(value, str | int | Decimal):
-        raise InvalidProviderResponseError(
-            f"{context} must be a numeric string, got {type(value).__name__}"
-        )
-    try:
-        result = Decimal(value)
-    except InvalidOperation as exc:
-        raise InvalidProviderResponseError(f"{context} is not a number: {value!r}") from exc
-    if not result.is_finite():
-        raise InvalidProviderResponseError(f"{context} is not finite: {value!r}")
-    return result
-
-
-def _timestamp_from_millis(value: Any, context: str) -> datetime:
-    """Convert a Unix millisecond timestamp into a UTC-aware datetime."""
-    if isinstance(value, bool) or not isinstance(value, int | str):
-        raise InvalidProviderResponseError(
-            f"{context} must be a Unix millisecond integer, got {type(value).__name__}"
-        )
-    try:
-        millis = int(value)
-    except ValueError as exc:
-        raise InvalidProviderResponseError(f"{context} is not an integer: {value!r}") from exc
-    try:
-        return datetime.fromtimestamp(millis / 1000, tz=UTC)
-    except (OverflowError, OSError, ValueError) as exc:
-        raise InvalidProviderResponseError(f"{context} is out of range: {value!r}") from exc
-
-
-def _build(model: type[ModelT], context: str, **fields: Any) -> ModelT:
-    """Instantiate a domain model, reporting rejection as a provider error."""
-    try:
-        return model(**fields)
-    except ValidationError as exc:
-        raise InvalidProviderResponseError(f"{context} violates {model.__name__}: {exc}") from exc
 
 
 __all__ = [

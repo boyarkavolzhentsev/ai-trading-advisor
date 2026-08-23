@@ -15,22 +15,35 @@ never on a concrete venue.
 from __future__ import annotations
 
 from app.market_data.exceptions import (
+    DataNotAvailableError,
     InvalidProviderResponseError,
     MarketDataError,
     ProviderUnavailableError,
     UnknownSymbolError,
     UnsupportedTimeframeError,
 )
-from app.market_data.protocols import DEFAULT_OHLCV_LIMIT, MarketDataProvider
+from app.market_data.protocols import (
+    DEFAULT_DEPTH_LIMIT,
+    DEFAULT_LIQUIDATION_LIMIT,
+    DEFAULT_OHLCV_LIMIT,
+    FuturesMarketDataProvider,
+    LiquidationProvider,
+    MarketDataProvider,
+)
 from app.market_data.provenance import MarketDataProvenance, MarketDataSource
 from app.market_data.timeframes import TIMEFRAME_DURATIONS, timeframe_duration
 from app.market_data.validators import DataQualityValidator
 
 __all__ = [
+    "DEFAULT_DEPTH_LIMIT",
+    "DEFAULT_LIQUIDATION_LIMIT",
     "DEFAULT_OHLCV_LIMIT",
     "TIMEFRAME_DURATIONS",
+    "DataNotAvailableError",
     "DataQualityValidator",
+    "FuturesMarketDataProvider",
     "InvalidProviderResponseError",
+    "LiquidationProvider",
     "MarketDataError",
     "MarketDataProvenance",
     "MarketDataProvider",

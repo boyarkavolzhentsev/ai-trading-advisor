@@ -8,9 +8,11 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.enums import (
+    ContractType,
     JudgeVerdictType,
     MarketRegime,
     MarketType,
+    OrderSide,
     Timeframe,
     TradeDirection,
     TradeStatus,
@@ -24,6 +26,8 @@ from app.core.models import AgentAssessment
     [
         (MarketType, {"US", "EU", "FX", "CRYPTO", "METALS", "ENERGIES"}),
         (TradeDirection, {"LONG", "SHORT", "NEUTRAL", "WAIT"}),
+        (ContractType, {"SPOT", "PERPETUAL"}),
+        (OrderSide, {"BUY", "SELL"}),
         (
             TradeStatus,
             {

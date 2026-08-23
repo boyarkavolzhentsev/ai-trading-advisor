@@ -1,4 +1,4 @@
-"""Instrument trading status enum."""
+"""Instrument trading status and contract identity enums."""
 
 from __future__ import annotations
 
@@ -16,3 +16,16 @@ class InstrumentStatus(StrEnum):
     HALTED = "HALTED"
     CLOSED = "CLOSED"
     UNKNOWN = "UNKNOWN"
+
+
+class ContractType(StrEnum):
+    """Kind of tradable contract behind a symbol.
+
+    The same base symbol (e.g. ``BTCUSDT``) can denote unrelated instruments
+    across markets - a Spot pair and a perpetual futures contract settle,
+    fund and margin differently. Every contract-bearing model carries this so
+    the two can never be silently treated as the same instrument.
+    """
+
+    SPOT = "SPOT"
+    PERPETUAL = "PERPETUAL"

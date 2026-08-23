@@ -22,6 +22,10 @@ class MarketDataSource(StrEnum):
     BOOK_TICKER = "book_ticker"
     KLINES = "klines"
     EXCHANGE_INFO = "exchange_info"
+    FUNDING_RATE = "funding_rate"
+    OPEN_INTEREST = "open_interest"
+    TAKER_FLOW = "taker_flow"
+    ORDER_BOOK = "order_book"
 
 
 class MarketDataProvenance(DomainModel):

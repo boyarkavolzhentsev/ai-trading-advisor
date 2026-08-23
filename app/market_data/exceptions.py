@@ -35,7 +35,18 @@ class UnknownSymbolError(MarketDataError):
     """Provider does not know the requested symbol."""
 
 
+class DataNotAvailableError(MarketDataError):
+    """The requested data does not exist on this transport for this provider.
+
+    Distinct from ``ProviderUnavailableError``: this is not a transient
+    failure that a retry could fix. It means the capability is not offered by
+    this adapter at all (e.g. Binance liquidations are REST-unavailable and
+    require the WebSocket transport added in a later stage).
+    """
+
+
 __all__ = [
+    "DataNotAvailableError",
     "InvalidProviderResponseError",
     "MarketDataError",
     "ProviderUnavailableError",
