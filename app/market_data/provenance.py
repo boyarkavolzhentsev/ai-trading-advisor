@@ -26,6 +26,10 @@ class MarketDataSource(StrEnum):
     OPEN_INTEREST = "open_interest"
     TAKER_FLOW = "taker_flow"
     ORDER_BOOK = "order_book"
+    TRADE = "trade"
+    ORDER_BOOK_DELTA = "order_book_delta"
+    MARK_PRICE = "mark_price"
+    LIQUIDATION = "liquidation"
 
 
 class MarketDataProvenance(DomainModel):
