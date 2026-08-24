@@ -90,6 +90,48 @@ python scripts/check_binance_market_data.py
 python scripts/check_binance_market_data.py --symbol ETHUSDT --candles 3
 ```
 
+## Flow analysts (Stage 2B)
+
+`app/flow_analysts` interprets a Stage 2A `FlowFeatureSnapshot`
+(`app.core.models.flow_feature_snapshot`) into structured, evidence-backed
+`FlowAnalysisResult` facts (`app.core.models.flow_analysis_result`) - one
+narrow specialist per Stage 2A domain, plus one relationship analyst:
+
+| Analyst | Interprets |
+| --- | --- |
+| `TakerFlowAnalyst` | `taker_flow` |
+| `LiquidationAnalyst` | `liquidation` |
+| `OrderBookLiquidityAnalyst` | `order_book` |
+| `OpenInterestAnalyst` | `open_interest` |
+| `FundingAnalyst` | `funding` |
+| `PriceFlowRelationshipAnalyst` | `cross_features`, plus a narrow read of `price_context`/`taker_flow`/`open_interest`/`liquidation` to describe price-vs-flow relationships |
+
+Every analyst implements the uniform `app.flow_analysts.protocols.FlowAnalyst`
+protocol (`analyze(snapshot) -> FlowAnalysisResult`): synchronous, stateless,
+provider-agnostic, independently callable, no network I/O, no shared mutable
+state, and no dependency on another analyst.
+
+Analysts classify only **sign, presence and structural window/band
+comparisons** already computed by Stage 2A - no magnitude thresholds, no
+"strong"/"unusual"/"extreme" labels, no abnormality detection (that needs a
+reference distribution and is deferred to a later calibration stage). Every
+`FlowAnalysisObservation` cites at least one `FlowEvidence` entry
+(`app.core.models.flow_evidence`); there is no free-text summary field.
+`FeatureQuality` (`VALID`/`PARTIAL`/`STALE`/`UNAVAILABLE`) is reused as-is
+from Stage 2A via `app.flow.quality.worse_of` - Stage 2B never invents a
+second severity system. An analyst **abstains** (`AnalystOutcome.ABSTAINED`,
+with explicit `abstention_reasons`) when no meaningful observation can be
+produced, rather than fabricating a neutral reading.
+
+Stage 2B v1 reasons only across the windows already contained in **one**
+snapshot - no cross-snapshot history, no calibrated thresholds, and no
+cross-analyst aggregation (that is a future Stage 2C Flow Supervisor's job).
+Analysts never emit a trading recommendation: no `LONG`/`SHORT`, no
+`BUY`/`SELL`, no entry/stop-loss/take-profit/position-size/confidence field -
+`app.core.models.assessment.AgentAssessment` (which does carry
+`TradeDirection`) is reserved for later, genuinely directional agents and is
+untouched by Stage 2B.
+
 ## Architecture principles
 
 | Role | Responsibility |
@@ -186,8 +228,10 @@ app/
   market_data/   provider protocol, quality validator, provenance
     providers/
       binance/   public Spot REST client, mapper, adapter
+  flow/          Stage 2A deterministic flow feature engine and calculators
+  flow_analysts/ Stage 2B specialized deterministic flow analysts
   markets/       us, eu, fx, crypto, metals, energies
-  technical/     flow/  context/  regime/  strategies/
+  technical/     context/  regime/  strategies/
   risk/          money_management/  diversification/
   decision/      judge/  execution/
   mt5/           statistics/  evaluation/  orchestration/

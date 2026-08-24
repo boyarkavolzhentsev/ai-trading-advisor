@@ -10,6 +10,8 @@ from app.core.models.cross_feature_observation import CrossFeatureObservation
 from app.core.models.data_quality import DataQuality
 from app.core.models.decision import TradeDecision
 from app.core.models.feature_status import FeatureStatus
+from app.core.models.flow_analysis_result import FlowAnalysisObservation, FlowAnalysisResult
+from app.core.models.flow_evidence import FlowEvidence
 from app.core.models.flow_feature_snapshot import FlowFeatureSnapshot
 from app.core.models.funding import FundingRate
 from app.core.models.funding_features import FundingFeatures, FundingWindowFeatures
@@ -46,6 +48,9 @@ __all__ = [
     "DomainModel",
     "EntryZone",
     "FeatureStatus",
+    "FlowAnalysisObservation",
+    "FlowAnalysisResult",
+    "FlowEvidence",
     "FlowFeatureSnapshot",
     "FundingFeatures",
     "FundingRate",
