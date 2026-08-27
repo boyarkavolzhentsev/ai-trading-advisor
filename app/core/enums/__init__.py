@@ -31,6 +31,7 @@ from app.core.enums.judge import JudgeVerdictType
 from app.core.enums.market import MarketType, Timeframe
 from app.core.enums.order import OrderSide
 from app.core.enums.quality import FeatureQuality
+from app.core.enums.rates import GovernmentYieldType, PolicyRateKind, SeriesUnit, TenorUnit
 from app.core.enums.regime import MarketRegime
 from app.core.enums.session import TradingSessionStatus
 from app.core.enums.stream import StreamStatus
@@ -52,6 +53,7 @@ __all__ = [
     "FeatureQuality",
     "FundingSign",
     "FundingTrend",
+    "GovernmentYieldType",
     "InstrumentStatus",
     "JudgeVerdictType",
     "LiquidationActivity",
@@ -62,9 +64,12 @@ __all__ = [
     "OrderBookPressure",
     "OrderSide",
     "OrdinalTrend",
+    "PolicyRateKind",
     "PriceFlowRelationship",
+    "SeriesUnit",
     "StreamStatus",
     "TakerFlowPressure",
+    "TenorUnit",
     "Timeframe",
     "TradeDirection",
     "TradeStatus",

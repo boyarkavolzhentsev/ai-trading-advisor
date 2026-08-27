@@ -17,6 +17,7 @@ from app.core.models.flow_evidence import FlowEvidence
 from app.core.models.flow_feature_snapshot import FlowFeatureSnapshot
 from app.core.models.funding import FundingRate
 from app.core.models.funding_features import FundingFeatures, FundingWindowFeatures
+from app.core.models.government_yield_observation import GovernmentYieldObservation
 from app.core.models.instrument import InstrumentMetadata
 from app.core.models.judge import JudgeVerdict
 from app.core.models.liquidation import LiquidationEvent
@@ -31,6 +32,7 @@ from app.core.models.open_interest_features import OpenInterestFeatures, OpenInt
 from app.core.models.order_book import OrderBookDeltaEvent, OrderBookLevel, OrderBookSnapshot
 from app.core.models.order_book_features import DepthBand, DepthBandFeatures, OrderBookFeatures
 from app.core.models.performance import PerformanceSnapshot
+from app.core.models.policy_rate_observation import PolicyRateObservation
 from app.core.models.position import PositionRecord
 from app.core.models.price_context_features import PriceContextWindowFeatures
 from app.core.models.quote import BidAskQuote, PriceQuote
@@ -41,6 +43,7 @@ from app.core.models.taker_flow import TakerFlowSnapshot
 from app.core.models.taker_flow_features import TakerFlowWindowFeatures
 from app.core.models.technical import TechnicalSnapshot
 from app.core.models.technical_feature_snapshot import TechnicalFeatureSnapshot
+from app.core.models.tenor import Tenor
 from app.core.models.trade_event import TradeEvent
 from app.core.models.trade_setup import EntryZone, TradeSetup
 from app.core.models.trend_features import TrendFeatures
@@ -66,6 +69,7 @@ __all__ = [
     "FundingFeatures",
     "FundingRate",
     "FundingWindowFeatures",
+    "GovernmentYieldObservation",
     "InstrumentMetadata",
     "JudgeVerdict",
     "LiquidationEvent",
@@ -85,6 +89,7 @@ __all__ = [
     "OrderBookLevel",
     "OrderBookSnapshot",
     "PerformanceSnapshot",
+    "PolicyRateObservation",
     "PositionRecord",
     "PriceContextWindowFeatures",
     "PriceQuote",
@@ -98,6 +103,7 @@ __all__ = [
     "TakerFlowWindowFeatures",
     "TechnicalFeatureSnapshot",
     "TechnicalSnapshot",
+    "Tenor",
     "TradeDecision",
     "TradeEvent",
     "TradeSetup",
