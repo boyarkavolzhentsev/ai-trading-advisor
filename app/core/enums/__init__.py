@@ -20,6 +20,12 @@ from app.core.enums.flow_analysis import (
     PriceFlowRelationship,
     TakerFlowPressure,
 )
+from app.core.enums.economic_calendar import (
+    CentralBank,
+    EconomicCategory,
+    EconomicEventImportance,
+    EconomicEventStatus,
+)
 from app.core.enums.instrument import ContractType, InstrumentStatus
 from app.core.enums.judge import JudgeVerdictType
 from app.core.enums.market import MarketType, Timeframe
@@ -36,9 +42,13 @@ __all__ = [
     "AnalystOutcome",
     "AnalystType",
     "BasisSign",
+    "CentralBank",
     "ContractType",
     "CorrelationRelationship",
     "DepthTrend",
+    "EconomicCategory",
+    "EconomicEventImportance",
+    "EconomicEventStatus",
     "FeatureQuality",
     "FundingSign",
     "FundingTrend",

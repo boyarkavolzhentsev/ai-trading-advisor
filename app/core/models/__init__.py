@@ -10,6 +10,7 @@ from app.core.models.candle_structure_features import CandleStructureFeatures
 from app.core.models.cross_feature_observation import CrossFeatureObservation
 from app.core.models.data_quality import DataQuality
 from app.core.models.decision import TradeDecision
+from app.core.models.economic_event import EconomicEvent, RateDecisionDetail
 from app.core.models.feature_status import FeatureStatus
 from app.core.models.flow_analysis_result import FlowAnalysisObservation, FlowAnalysisResult
 from app.core.models.flow_evidence import FlowEvidence
@@ -55,6 +56,7 @@ __all__ = [
     "DepthBand",
     "DepthBandFeatures",
     "DomainModel",
+    "EconomicEvent",
     "EntryZone",
     "FeatureStatus",
     "FlowAnalysisObservation",
@@ -87,6 +89,7 @@ __all__ = [
     "PriceContextWindowFeatures",
     "PriceQuote",
     "RangeStateFeatures",
+    "RateDecisionDetail",
     "RiskAssessment",
     "StreamHealth",
     "StructuralBreak",
