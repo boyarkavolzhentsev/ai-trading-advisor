@@ -27,6 +27,7 @@ from app.core.models.market_structure_features import MarketStructureFeatures, S
 from app.core.models.momentum_features import MomentumFeatures
 from app.core.models.money_management import MoneyManagementDecision
 from app.core.models.moving_average_features import MovingAverageFeatures
+from app.core.models.news_item import NewsItem
 from app.core.models.open_interest import OpenInterest
 from app.core.models.open_interest_features import OpenInterestFeatures, OpenInterestWindowFeatures
 from app.core.models.order_book import OrderBookDeltaEvent, OrderBookLevel, OrderBookSnapshot
@@ -80,6 +81,7 @@ __all__ = [
     "MoneyManagementDecision",
     "MovingAverageFeatures",
     "MutableDomainModel",
+    "NewsItem",
     "OHLCVCandle",
     "OpenInterest",
     "OpenInterestFeatures",
