@@ -12,6 +12,11 @@ from app.core.models.data_quality import DataQuality
 from app.core.models.decision import TradeDecision
 from app.core.models.economic_event import EconomicEvent, RateDecisionDetail
 from app.core.models.exchange_flow_observation import ExchangeFlowObservation
+from app.core.models.external_intelligence_analysis_result import (
+    ExternalIntelligenceAnalysisObservation,
+    ExternalIntelligenceAnalysisResult,
+)
+from app.core.models.external_intelligence_evidence import ExternalIntelligenceEvidence
 from app.core.models.feature_status import FeatureStatus
 from app.core.models.flow_analysis_result import FlowAnalysisObservation, FlowAnalysisResult
 from app.core.models.flow_evidence import FlowEvidence
@@ -69,6 +74,9 @@ __all__ = [
     "EconomicEvent",
     "EntryZone",
     "ExchangeFlowObservation",
+    "ExternalIntelligenceAnalysisObservation",
+    "ExternalIntelligenceAnalysisResult",
+    "ExternalIntelligenceEvidence",
     "FeatureStatus",
     "FlowAnalysisObservation",
     "FlowAnalysisResult",
