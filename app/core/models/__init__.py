@@ -11,6 +11,7 @@ from app.core.models.cross_feature_observation import CrossFeatureObservation
 from app.core.models.data_quality import DataQuality
 from app.core.models.decision import TradeDecision
 from app.core.models.economic_event import EconomicEvent, RateDecisionDetail
+from app.core.models.exchange_flow_observation import ExchangeFlowObservation
 from app.core.models.feature_status import FeatureStatus
 from app.core.models.flow_analysis_result import FlowAnalysisObservation, FlowAnalysisResult
 from app.core.models.flow_evidence import FlowEvidence
@@ -27,6 +28,7 @@ from app.core.models.market_structure_features import MarketStructureFeatures, S
 from app.core.models.momentum_features import MomentumFeatures
 from app.core.models.money_management import MoneyManagementDecision
 from app.core.models.moving_average_features import MovingAverageFeatures
+from app.core.models.network_activity_observation import NetworkActivityObservation
 from app.core.models.news_item import NewsItem
 from app.core.models.news_relevance_observation import NewsRelevanceObservation
 from app.core.models.news_sentiment_observation import NewsSentimentObservation
@@ -41,7 +43,9 @@ from app.core.models.price_context_features import PriceContextWindowFeatures
 from app.core.models.quote import BidAskQuote, PriceQuote
 from app.core.models.range_state_features import RangeStateFeatures
 from app.core.models.risk import RiskAssessment
+from app.core.models.stablecoin_supply_observation import StablecoinSupplyObservation
 from app.core.models.stream_health import StreamHealth
+from app.core.models.supply_observation import SupplyObservation
 from app.core.models.taker_flow import TakerFlowSnapshot
 from app.core.models.taker_flow_features import TakerFlowWindowFeatures
 from app.core.models.technical import TechnicalSnapshot
@@ -64,6 +68,7 @@ __all__ = [
     "DomainModel",
     "EconomicEvent",
     "EntryZone",
+    "ExchangeFlowObservation",
     "FeatureStatus",
     "FlowAnalysisObservation",
     "FlowAnalysisResult",
@@ -83,6 +88,7 @@ __all__ = [
     "MoneyManagementDecision",
     "MovingAverageFeatures",
     "MutableDomainModel",
+    "NetworkActivityObservation",
     "NewsItem",
     "NewsRelevanceObservation",
     "NewsSentimentObservation",
@@ -102,8 +108,10 @@ __all__ = [
     "RangeStateFeatures",
     "RateDecisionDetail",
     "RiskAssessment",
+    "StablecoinSupplyObservation",
     "StreamHealth",
     "StructuralBreak",
+    "SupplyObservation",
     "SwingPoint",
     "TakerFlowSnapshot",
     "TakerFlowWindowFeatures",

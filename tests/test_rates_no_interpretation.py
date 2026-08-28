@@ -13,6 +13,7 @@ import pytest
 from app.core.enums.rates import GovernmentYieldType, PolicyRateKind, SeriesUnit, TenorUnit
 from app.core.models.government_yield_observation import GovernmentYieldObservation
 from app.core.models.policy_rate_observation import PolicyRateObservation
+from app.core.models.stablecoin_supply_observation import StablecoinSupplyObservation
 from app.core.models.tenor import Tenor
 from app.rates import exceptions, history, protocols, provenance
 
@@ -90,6 +91,16 @@ def test_no_dxy_or_currency_index_model_exists() -> None:
 
 
 def test_no_liquidity_model_exists() -> None:
+    """No liquidity-series model exists anywhere in the repository.
+
+    ``StablecoinSupplyObservation`` is deliberately not in this list:
+    Stage 4E (``app.onchain``) is the explicitly approved owner of
+    stablecoin-supply facts, so its existence in ``app.core.models`` is
+    expected, not a violation - see
+    ``test_stablecoin_supply_observation_not_owned_by_rates`` below for the
+    check that still applies to it: ``app.rates`` itself must never
+    implement, import, or reference it.
+    """
     import app.core.models as core_models
 
     for forbidden in (
@@ -97,9 +108,22 @@ def test_no_liquidity_model_exists() -> None:
         "ReverseRepoObservation",
         "LiquidityObservation",
         "MoneySupplyObservation",
-        "StablecoinSupplyObservation",
     ):
         assert not hasattr(core_models, forbidden)
+
+
+def test_stablecoin_supply_observation_not_owned_by_rates() -> None:
+    """``StablecoinSupplyObservation`` belongs to Stage 4E (``app.onchain``),
+    not Stage 4B: ``app.rates`` must never implement stablecoin-supply
+    ingestion, a stablecoin provider protocol, a stablecoin history, or even
+    reference the model by name - Stage 4B's own facts stay policy
+    rates/government yields only.
+    """
+    for module in MODULES:
+        source = Path(inspect.getfile(module)).read_text(encoding="utf-8")
+        assert "StablecoinSupplyObservation" not in source
+        assert "stablecoin" not in source.lower()
+    assert StablecoinSupplyObservation not in MODEL_CLASSES
 
 
 def test_no_index_points_unit_exists() -> None:
