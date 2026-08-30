@@ -24,6 +24,7 @@ def test_values_are_configurable() -> None:
         starting_equity=Decimal("25000"),
         target_profit_percent=Decimal("4"),
         daily_risk_limit_percent=Decimal("1"),
+        portfolio_risk_limit_percent=Decimal("4"),
         max_cycle_drawdown_percent=Decimal("5"),
         cycle_days=7,
     )

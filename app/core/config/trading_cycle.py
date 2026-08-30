@@ -32,6 +32,7 @@ class TradingCycleConfig(DomainModel):
     target_profit_percent: PositivePercent = Decimal("6.0")
     daily_risk_limit_percent: PositivePercent = Decimal("1.5")
     per_trade_risk_limit_percent: PositivePercent = Decimal("0.5")
+    portfolio_risk_limit_percent: PositivePercent = Decimal("6")
     max_cycle_drawdown_percent: PositivePercent = Decimal("7.5")
     cycle_days: Annotated[int, Field(ge=1)] = 14
 
@@ -48,5 +49,13 @@ class TradingCycleConfig(DomainModel):
         if self.per_trade_risk_limit_percent > self.daily_risk_limit_percent:
             raise ValueError(
                 "per_trade_risk_limit_percent cannot exceed daily_risk_limit_percent"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_portfolio_within_drawdown(self) -> Self:
+        if self.portfolio_risk_limit_percent > self.max_cycle_drawdown_percent:
+            raise ValueError(
+                "portfolio_risk_limit_percent cannot exceed max_cycle_drawdown_percent"
             )
         return self

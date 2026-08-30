@@ -1,12 +1,14 @@
-"""Stage 6C implementation must not create any Stage 8/9/10 file.
+"""Stage 6C implementation must not create any Stage 9/10 file.
 
 ``app/risk`` and ``app/money_management`` are Stage 7's own designated
-packages (approved and implemented in a later turn than this test's own
-Stage 6C authorship - see ``tests/risk_gate_support.py`` and
-``tests/test_risk_gate_*.py`` for their own coverage) and are therefore no
-longer checked here. ``app/diversification``, ``app/mt5``, ``app/execution``
-and ``app/statistics`` must still contain only their pre-existing
-``__init__.py`` stub - no production or config module of any kind.
+packages, and ``app/diversification`` is Stage 8's own designated package
+(both approved and implemented in later turns than this test's own Stage 6C
+authorship - see ``tests/risk_gate_support.py``/``tests/test_risk_gate_*.py``
+and ``tests/portfolio_support.py``/``tests/test_portfolio_*.py`` for their
+own coverage) and are therefore no longer checked here. ``app/mt5``,
+``app/execution`` and ``app/statistics`` must still contain only their
+pre-existing ``__init__.py`` stub - no production or config module of any
+kind.
 """
 
 from __future__ import annotations
@@ -15,16 +17,15 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-_STAGE_8_PLUS_PACKAGES = (
-    "app/diversification",
+_STAGE_9_PLUS_PACKAGES = (
     "app/mt5",
     "app/execution",
     "app/statistics",
 )
 
 
-def test_stage_8_plus_packages_contain_only_init() -> None:
-    for package in _STAGE_8_PLUS_PACKAGES:
+def test_stage_9_plus_packages_contain_only_init() -> None:
+    for package in _STAGE_9_PLUS_PACKAGES:
         package_dir = REPO_ROOT / package
         assert package_dir.is_dir(), f"{package} is expected to already exist as a stub package"
         python_files = sorted(p.name for p in package_dir.glob("*.py"))
