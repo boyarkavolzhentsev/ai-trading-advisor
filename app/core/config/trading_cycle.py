@@ -31,6 +31,7 @@ class TradingCycleConfig(DomainModel):
     starting_equity: Annotated[Decimal, Field(gt=0)] = Decimal("100000")
     target_profit_percent: PositivePercent = Decimal("6.0")
     daily_risk_limit_percent: PositivePercent = Decimal("1.5")
+    per_trade_risk_limit_percent: PositivePercent = Decimal("0.5")
     max_cycle_drawdown_percent: PositivePercent = Decimal("7.5")
     cycle_days: Annotated[int, Field(ge=1)] = 14
 
@@ -39,5 +40,13 @@ class TradingCycleConfig(DomainModel):
         if self.daily_risk_limit_percent > self.max_cycle_drawdown_percent:
             raise ValueError(
                 "daily_risk_limit_percent cannot exceed max_cycle_drawdown_percent"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_per_trade_within_daily(self) -> Self:
+        if self.per_trade_risk_limit_percent > self.daily_risk_limit_percent:
+            raise ValueError(
+                "per_trade_risk_limit_percent cannot exceed daily_risk_limit_percent"
             )
         return self

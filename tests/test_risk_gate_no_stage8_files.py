@@ -1,12 +1,9 @@
-"""Stage 6C implementation must not create any Stage 8/9/10 file.
+"""Stage 7 implementation must not create any Stage 8/9/10 file.
 
-``app/risk`` and ``app/money_management`` are Stage 7's own designated
-packages (approved and implemented in a later turn than this test's own
-Stage 6C authorship - see ``tests/risk_gate_support.py`` and
-``tests/test_risk_gate_*.py`` for their own coverage) and are therefore no
-longer checked here. ``app/diversification``, ``app/mt5``, ``app/execution``
-and ``app/statistics`` must still contain only their pre-existing
-``__init__.py`` stub - no production or config module of any kind.
+``app/diversification``, ``app/mt5``, ``app/execution`` and
+``app/statistics`` must each still contain only their pre-existing
+``__init__.py`` stub - no production or config module of any kind. No
+``app/portfolio`` package exists at all.
 """
 
 from __future__ import annotations
@@ -29,3 +26,7 @@ def test_stage_8_plus_packages_contain_only_init() -> None:
         assert package_dir.is_dir(), f"{package} is expected to already exist as a stub package"
         python_files = sorted(p.name for p in package_dir.glob("*.py"))
         assert python_files == ["__init__.py"], f"{package} contains unexpected files: {python_files}"
+
+
+def test_no_portfolio_package_exists() -> None:
+    assert not (REPO_ROOT / "app" / "portfolio").exists()
