@@ -1,12 +1,14 @@
 """Stage 7 implementation must not create any Stage 9/10 file.
 
-``app/diversification`` is Stage 8's own designated package (approved and
-implemented in a later turn than this test's own Stage 7 authorship - see
-``tests/portfolio_support.py``/``tests/test_portfolio_*.py`` for its own
-coverage) and is therefore no longer checked here. ``app/mt5``,
-``app/execution`` and ``app/statistics`` must each still contain only their
-pre-existing ``__init__.py`` stub - no production or config module of any
-kind. No ``app/portfolio`` package exists at all.
+``app/diversification`` is Stage 8's own designated package, and
+``app/statistics`` is Stage 9's own designated package (both approved and
+implemented in later turns than this test's own Stage 7 authorship - see
+``tests/portfolio_support.py``/``tests/test_portfolio_*.py`` and
+``tests/session_support.py``/``tests/test_session_gate_*.py``/
+``tests/test_statistics_*.py`` for their own coverage) and are therefore no
+longer checked here. ``app/mt5`` and ``app/execution`` must each still
+contain only their pre-existing ``__init__.py`` stub - no production or
+config module of any kind. No ``app/portfolio`` package exists at all.
 """
 
 from __future__ import annotations
@@ -18,7 +20,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 _STAGE_9_PLUS_PACKAGES = (
     "app/mt5",
     "app/execution",
-    "app/statistics",
 )
 
 

@@ -1,8 +1,13 @@
 """Stage 8 implementation must not create any Stage 9/10 file.
 
-``app/statistics``, ``app/mt5`` and ``app/execution`` must each still
+``app/statistics`` is Stage 9's own designated package (approved and
+implemented in a later turn than this test's own Stage 8 authorship - see
+``tests/session_support.py``/``tests/test_session_gate_*.py`` and
+``tests/test_statistics_*.py`` for its own coverage) and is therefore no
+longer checked here. ``app/mt5`` and ``app/execution`` must each still
 contain only their pre-existing ``__init__.py`` stub - no production or
 config module of any kind. No ``app/portfolio`` package exists at all.
+Mirrors ``tests/test_risk_gate_no_stage8_files.py`` one stage over.
 """
 
 from __future__ import annotations
@@ -12,7 +17,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _STAGE_9_PLUS_PACKAGES = (
-    "app/statistics",
     "app/mt5",
     "app/execution",
 )
