@@ -13,6 +13,20 @@ Stage 8's reach.
 boundary (Stage 9 Session/Statistics Management, then Stage 10 MT5/broker
 integration), not final approval: Stage 8 is not the last stage before
 execution.
+
+Stage 8 jointly enforces two independent shared capacities against the sum
+of every simultaneously Risk-eligible family's ``max_individual_risk``: the
+Stage 7 daily-loss-derived ``available_new_trade_risk`` (re-derived locally,
+never imported - see ``app.diversification.supervisor``) and Stage 8's own
+``portfolio_risk_limit_percent``-derived capacity. ``RISK_NOT_ELIGIBLE``,
+``DAILY_RISK_CAPACITY_EXHAUSTED`` and ``GLOBAL_PORTFOLIO_CAP_REACHED`` are
+structurally mutually exclusive: the first applies only to a family Risk
+already blocked; of the remaining two, whichever shared capacity is
+non-positive names the reason, with ``DAILY_RISK_CAPACITY_EXHAUSTED`` taking
+precedence whenever both are simultaneously non-positive - the tighter,
+upstream daily-risk safety boundary already prevents any new allocation
+regardless of the portfolio capacity's own state, mirroring Stage 9's own
+"daily-loss exhaustion is the most conservative fact" precedence.
 """
 
 from __future__ import annotations
@@ -54,6 +68,7 @@ class PortfolioBlockReason(StrEnum):
     """
 
     RISK_NOT_ELIGIBLE = "RISK_NOT_ELIGIBLE"
+    DAILY_RISK_CAPACITY_EXHAUSTED = "DAILY_RISK_CAPACITY_EXHAUSTED"
     GLOBAL_PORTFOLIO_CAP_REACHED = "GLOBAL_PORTFOLIO_CAP_REACHED"
 
 

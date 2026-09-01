@@ -65,10 +65,19 @@ EXPECTED_SHA256 = {
     "app/money_management/__init__.py": "9c4369b4dcd4583210e7729a07fcca32d044280d1092a59b79d0f43958a26907",
     "app/money_management/sizing.py": "0e5c209935aa008d3f1d34e62157d9f0a0dba1bbe11c7bb6c17cdf09755787cc",
     # Stage 8 production files
-    "app/core/enums/portfolio.py": "1cca23bf1e877dd2031d681f60a2f147be044f987d8e7c9bbda6835a760521c6",
-    "app/core/models/portfolio_result.py": "7503f9768e34f1775a9535dfd0e3a76444fada7b92a2bd780a0c7869f5c3413f",
+    # NOTE: portfolio.py, portfolio_result.py and supervisor.py were
+    # deliberately, approvedly modified after this baseline was pinned, to
+    # correct the Stage 7/Stage 8 joint-risk-allocation gap (see the Stage
+    # 7->8 corrective-design audit): Stage 8 previously enforced only its own
+    # portfolio-percent capacity, allowing aggregate new-trade risk to exceed
+    # Stage 7's shared daily-loss capacity even though every individual
+    # Stage 7 family verdict and the Stage 8 portfolio cap were each
+    # independently valid. These three hashes were bumped to the corrected
+    # content as part of that approved, out-of-band fix - not by Stage 9.
+    "app/core/enums/portfolio.py": "16c9d295a0c6915e126b6b84d78de8a7af7eee913ba556a78a868f9dfdfaf56f",
+    "app/core/models/portfolio_result.py": "9282bafa3fc6064173e4e0cc80feec70be9d31a69f1fdc0c00e23729683b341c",
     "app/diversification/__init__.py": "16737f2cd3895c7b64b2f88780f6db9a256b95c238d0c2cfd60387fc5d8aa2ae",
-    "app/diversification/supervisor.py": "c8ec58e3befe4906d49a6e63b3719eadd0aaef65c883ef2ef78e07462b4f42bb",
+    "app/diversification/supervisor.py": "75c51ffb2f14333a6a641482196e2f1d4990ce7c578139c35c51cd6eb72651aa",
     "app/diversification/protocols.py": "303f369771c12d9ac41247337af2f7c899adb5e1f36badaae90eaa1140c6084f",
     # Stage 5 production files (upstream of 6/7/8/9, must also stay untouched)
     "app/market_evaluation/__init__.py": "cd97fcd8afc4e3da5292f8cb911c83e49b18ee313c0d9638ea4b14bed23a1e12",

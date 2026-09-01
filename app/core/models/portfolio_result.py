@@ -44,6 +44,18 @@ position, or execution of any kind has been approved. Stage 8 never inspects
 direction: opposite-direction, same-symbol families are treated identically
 to same-direction ones, both counting fully toward the shared capacity, with
 no netting or offsetting of any kind.
+
+Stage 8 jointly enforces two independent shared capacities against the sum
+of every simultaneously Risk-eligible family's ``max_individual_risk``:
+Stage 7's daily-loss-derived ``available_new_trade_risk`` (re-derived
+locally below - never imported from ``app.risk``) and Stage 8's own
+``portfolio_risk_limit_percent``-derived capacity. ``joint_new_risk_capacity``
+is the minimum of the two, so the sum of every family's
+``portfolio_allocated_risk`` can never exceed either capacity individually -
+correcting a gap where enforcing the portfolio-percent capacity alone could
+jointly allocate aggregate new risk above Stage 7's shared daily-loss
+capacity even though every individual Stage 7 family verdict was
+independently valid.
 """
 
 from __future__ import annotations
@@ -57,9 +69,25 @@ from app.core.enums.portfolio import PortfolioBlockReason, PortfolioFamilyVerdic
 from app.core.enums.risk_gate import RiskFamilyVerdict
 from app.core.enums.strategy_router import StrategyFamily
 from app.core.models.base import DomainModel
-from app.core.models.risk_gate_result import RiskFamilyResult, StrategyRiskResult
+from app.core.models.risk_gate_result import AccountRiskSnapshot, RiskFamilyResult, StrategyRiskResult
+from app.core.config.trading_cycle import TradingCycleConfig
 
 _ExpectedFamilyResult = tuple[PortfolioFamilyVerdict, tuple[PortfolioBlockReason, ...], Decimal | None]
+
+
+def _stage7_shared_capacity(account_snapshot: AccountRiskSnapshot, trading_cycle_config: TradingCycleConfig) -> Decimal:
+    """Independently re-derive Stage 7's shared daily new-trade-risk
+    capacity - a locally-owned copy, not imported from ``app.risk.engine`` or
+    ``app.diversification.supervisor`` (each of which already maintains its
+    own independent copy of this identical formula), mirroring the Stage
+    5A/6A/6C/7 precedent of the operational component and the result model's
+    self-validation maintaining independent copies of the same primitive
+    rather than cross-importing one from the other."""
+    daily_loss_limit = account_snapshot.rollover_equity * (trading_cycle_config.daily_risk_limit_percent / Decimal("100"))
+    current_daily_pnl = account_snapshot.realized_daily_pnl + account_snapshot.floating_pnl
+    loss_consumed = max(Decimal("0"), -current_daily_pnl)
+    remaining_daily_loss_capacity = max(Decimal("0"), daily_loss_limit - loss_consumed)
+    return max(Decimal("0"), remaining_daily_loss_capacity - account_snapshot.current_open_risk_to_stop)
 
 
 def _remaining_portfolio_capacity(strategy_risk_result: StrategyRiskResult) -> Decimal:
@@ -76,8 +104,14 @@ def _remaining_portfolio_capacity(strategy_risk_result: StrategyRiskResult) -> D
     return max(Decimal("0"), portfolio_risk_budget - account_snapshot.current_open_risk_to_stop)
 
 
+def _joint_new_risk_capacity(strategy_risk_result: StrategyRiskResult) -> tuple[Decimal, Decimal, Decimal]:
+    stage7_shared_capacity = _stage7_shared_capacity(strategy_risk_result.account_snapshot, strategy_risk_result.trading_cycle_config)
+    stage8_portfolio_capacity = _remaining_portfolio_capacity(strategy_risk_result)
+    return stage7_shared_capacity, stage8_portfolio_capacity, min(stage7_shared_capacity, stage8_portfolio_capacity)
+
+
 def _expected_group_results(strategy_risk_result: StrategyRiskResult) -> dict[StrategyFamily, _ExpectedFamilyResult]:
-    remaining_portfolio_capacity = _remaining_portfolio_capacity(strategy_risk_result)
+    stage7_shared_capacity, stage8_portfolio_capacity, joint_new_risk_capacity = _joint_new_risk_capacity(strategy_risk_result)
     eligible_results = [
         result for result in strategy_risk_result.family_results if result.verdict is RiskFamilyVerdict.ELIGIBLE_FOR_PORTFOLIO_REVIEW
     ]
@@ -91,16 +125,22 @@ def _expected_group_results(strategy_risk_result: StrategyRiskResult) -> dict[St
                 (PortfolioBlockReason.RISK_NOT_ELIGIBLE,),
                 None,
             )
-        elif remaining_portfolio_capacity <= 0:
+        elif stage7_shared_capacity <= 0:
+            expected[risk_result.family] = (
+                PortfolioFamilyVerdict.BLOCKED_BY_PORTFOLIO,
+                (PortfolioBlockReason.DAILY_RISK_CAPACITY_EXHAUSTED,),
+                None,
+            )
+        elif stage8_portfolio_capacity <= 0:
             expected[risk_result.family] = (
                 PortfolioFamilyVerdict.BLOCKED_BY_PORTFOLIO,
                 (PortfolioBlockReason.GLOBAL_PORTFOLIO_CAP_REACHED,),
                 None,
             )
-        elif total_requested <= remaining_portfolio_capacity:
+        elif total_requested <= joint_new_risk_capacity:
             expected[risk_result.family] = (PortfolioFamilyVerdict.ELIGIBLE_FOR_SESSION_REVIEW, (), risk_result.max_individual_risk)
         else:
-            scaling_factor = remaining_portfolio_capacity / total_requested
+            scaling_factor = joint_new_risk_capacity / total_requested
             expected[risk_result.family] = (
                 PortfolioFamilyVerdict.ELIGIBLE_FOR_SESSION_REVIEW,
                 (),
@@ -114,12 +154,15 @@ class PortfolioFamilyResult(DomainModel):
 
     ``reasons`` is empty if and only if ``verdict`` is
     ``ELIGIBLE_FOR_SESSION_REVIEW``; when non-empty it carries exactly one
-    canonical reason - ``RISK_NOT_ELIGIBLE`` and
-    ``GLOBAL_PORTFOLIO_CAP_REACHED`` are structurally mutually exclusive (the
-    former only ever applies to a Risk-blocked family, which never reaches
-    the capacity check the latter represents). Carries no direction,
-    ``risk_per_unit``, account snapshot, config, or upstream evidence - all
-    remain recoverable only through the embedded ``StrategyRiskResult`` on
+    canonical reason - ``RISK_NOT_ELIGIBLE``, ``DAILY_RISK_CAPACITY_EXHAUSTED``
+    and ``GLOBAL_PORTFOLIO_CAP_REACHED`` are structurally mutually exclusive
+    (the first only ever applies to a Risk-blocked family, which never
+    reaches the joint-capacity check the other two represent;
+    ``DAILY_RISK_CAPACITY_EXHAUSTED`` takes precedence over
+    ``GLOBAL_PORTFOLIO_CAP_REACHED`` whenever both shared capacities are
+    simultaneously non-positive). Carries no direction, ``risk_per_unit``,
+    account snapshot, config, or upstream evidence - all remain recoverable
+    only through the embedded ``StrategyRiskResult`` on
     ``StrategyPortfolioResult``.
     """
 
@@ -214,13 +257,17 @@ class StrategyPortfolioResult(DomainModel):
 
     @model_validator(mode="after")
     def _validate_total_allocation_within_remaining_capacity(self) -> Self:
-        remaining_portfolio_capacity = _remaining_portfolio_capacity(self.strategy_risk_result)
+        stage7_shared_capacity, stage8_portfolio_capacity, joint_new_risk_capacity = _joint_new_risk_capacity(self.strategy_risk_result)
         total_allocated = sum(
             (result.portfolio_allocated_risk for result in self.family_results if result.portfolio_allocated_risk is not None),
             Decimal("0"),
         )
-        if total_allocated > remaining_portfolio_capacity:
-            raise ValueError("sum of portfolio_allocated_risk exceeds remaining_portfolio_capacity")
+        if total_allocated > stage7_shared_capacity:
+            raise ValueError("sum of portfolio_allocated_risk exceeds stage7_shared_capacity")
+        if total_allocated > stage8_portfolio_capacity:
+            raise ValueError("sum of portfolio_allocated_risk exceeds stage8_portfolio_capacity")
+        if total_allocated > joint_new_risk_capacity:
+            raise ValueError("sum of portfolio_allocated_risk exceeds joint_new_risk_capacity")
         return self
 
 

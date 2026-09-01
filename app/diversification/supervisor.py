@@ -19,10 +19,25 @@ which direction a family favors, is Stage 6B/6C's question, answered
 upstream, never re-asked here.
 
 Every simultaneously Risk-eligible family is scaled by the *identical*
-proportional factor against the *same* shared capacity: no budget is
+proportional factor against the *same* joint shared capacity: no budget is
 reserved, sequenced, or preferentially assigned between family results, and
 no family is ever favored over another. Opposite-direction, same-symbol
 families are never netted or offset - Stage 8 never reads direction at all.
+
+Stage 8 jointly enforces two independent shared capacities against the sum
+of every simultaneously Risk-eligible family's ``max_individual_risk``:
+Stage 7's daily-loss-derived ``available_new_trade_risk`` (re-derived
+locally below - never imported from ``app.risk``, mirroring the Stage
+5A/6A/6C/7 precedent of the operational component and the result model's
+self-validation maintaining independent copies of the same primitive rather
+than cross-importing one from the other) and Stage 8's own
+``portfolio_risk_limit_percent``-derived capacity. Enforcing only the
+portfolio-percent capacity - as Stage 8 did before this joint-capacity
+correction - could jointly allocate aggregate new risk above Stage 7's
+shared daily-loss capacity even though every individual Stage 7 family
+verdict was independently valid; the ``joint_new_risk_capacity`` below is
+the minimum of the two, so the sum of every family's
+``portfolio_allocated_risk`` can never exceed either capacity.
 """
 
 from __future__ import annotations
@@ -34,6 +49,21 @@ from app.core.enums.risk_gate import RiskFamilyVerdict
 from app.core.models.portfolio_result import PortfolioFamilyResult, StrategyPortfolioResult
 from app.core.models.risk_gate_result import AccountRiskSnapshot, RiskFamilyResult, StrategyRiskResult
 from app.core.config.trading_cycle import TradingCycleConfig
+
+
+def _stage7_shared_capacity(account_snapshot: AccountRiskSnapshot, trading_cycle_config: TradingCycleConfig) -> Decimal:
+    """A locally-owned copy of Stage 7's shared daily new-trade-risk capacity
+    arithmetic - not imported from ``app.risk.engine`` or
+    ``app.core.models.risk_gate_result`` (each of which already maintains its
+    own independent copy of this identical formula), mirroring the Stage
+    5A/6A/6C/7 precedent of the operational component and the result model's
+    self-validation maintaining independent copies of the same primitive
+    rather than cross-importing one from the other."""
+    daily_loss_limit = account_snapshot.rollover_equity * (trading_cycle_config.daily_risk_limit_percent / Decimal("100"))
+    current_daily_pnl = account_snapshot.realized_daily_pnl + account_snapshot.floating_pnl
+    loss_consumed = max(Decimal("0"), -current_daily_pnl)
+    remaining_daily_loss_capacity = max(Decimal("0"), daily_loss_limit - loss_consumed)
+    return max(Decimal("0"), remaining_daily_loss_capacity - account_snapshot.current_open_risk_to_stop)
 
 
 def _remaining_portfolio_capacity(account_snapshot: AccountRiskSnapshot, trading_cycle_config: TradingCycleConfig) -> Decimal:
@@ -50,7 +80,9 @@ def _remaining_portfolio_capacity(account_snapshot: AccountRiskSnapshot, trading
 
 def _evaluate_family(
     risk_result: RiskFamilyResult,
-    remaining_portfolio_capacity: Decimal,
+    stage7_shared_capacity: Decimal,
+    stage8_portfolio_capacity: Decimal,
+    joint_new_risk_capacity: Decimal,
     total_requested: Decimal,
 ) -> PortfolioFamilyResult:
     if risk_result.verdict is RiskFamilyVerdict.BLOCKED_BY_RISK:
@@ -60,7 +92,14 @@ def _evaluate_family(
             reasons=(PortfolioBlockReason.RISK_NOT_ELIGIBLE,),
         )
 
-    if remaining_portfolio_capacity <= 0:
+    if stage7_shared_capacity <= 0:
+        return PortfolioFamilyResult(
+            family=risk_result.family,
+            verdict=PortfolioFamilyVerdict.BLOCKED_BY_PORTFOLIO,
+            reasons=(PortfolioBlockReason.DAILY_RISK_CAPACITY_EXHAUSTED,),
+        )
+
+    if stage8_portfolio_capacity <= 0:
         return PortfolioFamilyResult(
             family=risk_result.family,
             verdict=PortfolioFamilyVerdict.BLOCKED_BY_PORTFOLIO,
@@ -69,10 +108,10 @@ def _evaluate_family(
 
     assert risk_result.max_individual_risk is not None  # guaranteed by RiskFamilyResult's own invariants
 
-    if total_requested <= remaining_portfolio_capacity:
+    if total_requested <= joint_new_risk_capacity:
         portfolio_allocated_risk = risk_result.max_individual_risk
     else:
-        scaling_factor = remaining_portfolio_capacity / total_requested
+        scaling_factor = joint_new_risk_capacity / total_requested
         portfolio_allocated_risk = risk_result.max_individual_risk * scaling_factor
 
     return PortfolioFamilyResult(
@@ -86,16 +125,19 @@ class PortfolioSupervisor:
     """Deterministic Stage 8 aggregator over one ``StrategyRiskResult``."""
 
     def evaluate(self, *, strategy_risk_result: StrategyRiskResult) -> StrategyPortfolioResult:
-        remaining_portfolio_capacity = _remaining_portfolio_capacity(
-            strategy_risk_result.account_snapshot, strategy_risk_result.trading_cycle_config
-        )
+        account_snapshot = strategy_risk_result.account_snapshot
+        trading_cycle_config = strategy_risk_result.trading_cycle_config
+        stage7_shared_capacity = _stage7_shared_capacity(account_snapshot, trading_cycle_config)
+        stage8_portfolio_capacity = _remaining_portfolio_capacity(account_snapshot, trading_cycle_config)
+        joint_new_risk_capacity = min(stage7_shared_capacity, stage8_portfolio_capacity)
+
         eligible_results = [
             result for result in strategy_risk_result.family_results if result.verdict is RiskFamilyVerdict.ELIGIBLE_FOR_PORTFOLIO_REVIEW
         ]
         total_requested = sum((result.max_individual_risk for result in eligible_results), Decimal("0"))
 
         family_results = tuple(
-            _evaluate_family(risk_result, remaining_portfolio_capacity, total_requested)
+            _evaluate_family(risk_result, stage7_shared_capacity, stage8_portfolio_capacity, joint_new_risk_capacity, total_requested)
             for risk_result in strategy_risk_result.family_results
         )
         any_eligible = any(result.verdict is PortfolioFamilyVerdict.ELIGIBLE_FOR_SESSION_REVIEW for result in family_results)
