@@ -1,9 +1,14 @@
 """Stage 9 implementation must not create any Stage 10 file.
 
-``app/mt5`` and ``app/execution`` must each still contain only their
-pre-existing ``__init__.py`` stub - no production or config module of any
-kind. ``app/statistics`` (Stage 9's own designated package) is checked
-against the exact approved file set instead - mirrors
+``app/mt5`` is Stage 10's own designated package and is no longer checked
+here now that Stage 10A has legitimately started (see
+``tests/mt5_support.py``/``tests/test_mt5_*.py`` for its own coverage, and
+``tests/test_mt5_module_hygiene.py::test_app_mt5_contains_only_approved_
+stage_10a_files`` for its exact approved-file-set guard, mirroring this
+test's own pattern one stage over). ``app/execution`` must still contain
+only its pre-existing ``__init__.py`` stub - no production or config module
+of any kind. ``app/statistics`` (Stage 9's own designated package) is
+checked against the exact approved file set instead - mirrors
 ``tests/test_portfolio_no_stage9_files.py``/``tests/test_risk_gate_no_stage8_files.py``
 one stage over.
 """
@@ -14,10 +19,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-_STAGE_10_PLUS_PACKAGES = (
-    "app/mt5",
-    "app/execution",
-)
+_STAGE_10_PLUS_PACKAGES = ("app/execution",)
 
 
 def test_stage_10_plus_packages_contain_only_init() -> None:

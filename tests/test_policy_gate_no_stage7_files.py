@@ -8,9 +8,11 @@ implemented in later turns than this test's own Stage 6C authorship - see
 ``tests/portfolio_support.py``/``tests/test_portfolio_*.py``, and
 ``tests/session_support.py``/``tests/test_session_gate_*.py``/
 ``tests/test_statistics_*.py`` for their own coverage) and are therefore no
-longer checked here. ``app/mt5`` and ``app/execution`` must still contain
-only their pre-existing ``__init__.py`` stub - no production or config
-module of any kind.
+longer checked here. ``app/mt5`` is Stage 10's own designated package and is
+likewise no longer checked here now that Stage 10A has legitimately started
+(see ``tests/mt5_support.py``/``tests/test_mt5_*.py`` for its own coverage).
+``app/execution`` must still contain only its pre-existing ``__init__.py``
+stub - no production or config module of any kind.
 """
 
 from __future__ import annotations
@@ -19,14 +21,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-_STAGE_9_PLUS_PACKAGES = (
-    "app/mt5",
-    "app/execution",
-)
+_STAGE_10_PLUS_PACKAGES = ("app/execution",)
 
 
-def test_stage_9_plus_packages_contain_only_init() -> None:
-    for package in _STAGE_9_PLUS_PACKAGES:
+def test_stage_10_plus_packages_contain_only_init() -> None:
+    for package in _STAGE_10_PLUS_PACKAGES:
         package_dir = REPO_ROOT / package
         assert package_dir.is_dir(), f"{package} is expected to already exist as a stub package"
         python_files = sorted(p.name for p in package_dir.glob("*.py"))
