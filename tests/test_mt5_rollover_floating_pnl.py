@@ -1,6 +1,9 @@
 """Stage 10B ``MT5AccountFacts.floating_pnl`` amendment: sourced only from
-``account_info.profit``, signed, no fabricated zero fallback, no position
-read, no protocol extension."""
+``account_info.profit``, signed, no fabricated zero fallback, and (at the
+time of Stage 10B) no protocol extension. Stage 10C later adds ``positions()``/
+``symbol_facts()`` to the protocol for its own, unrelated open-risk/sizing
+purpose - these tests confirm ``floating_pnl`` specifically never depends on
+that position data, not that ``client.py``/the protocol stay frozen forever."""
 
 from __future__ import annotations
 
@@ -65,12 +68,16 @@ def test_client_source_has_no_zero_fallback_for_floating_pnl() -> None:
     assert "or Decimal(0)" not in source
 
 
-def test_client_source_never_reads_positions_for_floating_pnl() -> None:
+def test_floating_pnl_assignment_does_not_reference_positions() -> None:
+    """The floating_pnl assignment itself is sourced only from
+    account_info.profit - Stage 10C's later positions_get()/symbol_info()
+    reads (added for open-risk/sizing, not floating_pnl) never feed it."""
     source = inspect.getsource(client_module)
-    assert "positions_get" not in source
+    floating_pnl_line = next(line for line in source.splitlines() if "floating_pnl=" in line)
+    assert "positions" not in floating_pnl_line
     assert "history_deals" not in source
 
 
-def test_protocol_still_exposes_exactly_four_methods() -> None:
+def test_protocol_exposes_no_history_or_order_methods() -> None:
     members = {name for name, _ in inspect.getmembers(MT5ClientProtocol) if not name.startswith("_")}
-    assert members == {"initialize", "runtime_status", "account_facts", "shutdown"}
+    assert members.isdisjoint({"history_deals", "history_orders", "order_send", "order_check"})

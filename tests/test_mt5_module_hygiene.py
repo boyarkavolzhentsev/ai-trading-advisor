@@ -1,10 +1,11 @@
-"""Stage 10A/10B dependency-boundary hygiene.
+"""Stage 10A/10B/10C dependency-boundary hygiene.
 
 Only ``app.mt5.client`` may import ``MetaTrader5``; nothing in ``app.core``
 or Stage 5-9 production packages may import ``app.mt5``; the protocol
-exposes no order-placement surface; and ``app/mt5`` contains exactly its
-approved Stage 10A + 10B file set (rollover transition logic and rollover
-persistence), with every later Stage 10C-E file name still reserved."""
+exposes no order-placement/history surface; and ``app/mt5`` contains exactly
+its approved Stage 10A + 10B + 10C file set (rollover transition/persistence,
+open-risk assessment, broker sizing), with every later Stage 10D-E file name
+still reserved."""
 
 from __future__ import annotations
 
@@ -73,8 +74,12 @@ def test_pure_mt5_modules_import_without_metatrader5_installed() -> None:
             sys.executable,
             "-c",
             "import app.mt5.protocols; import app.mt5.errors; import app.mt5.rollover; import app.mt5.persistence; "
+            "import app.mt5.risk; import app.mt5.sizing; "
             "import app.core.models.mt5_runtime; import app.core.enums.mt5_runtime; "
-            "import app.core.models.mt5_rollover; import app.core.enums.mt5_rollover; import app.core.config.mt5_rollover",
+            "import app.core.models.mt5_rollover; import app.core.enums.mt5_rollover; import app.core.config.mt5_rollover; "
+            "import app.core.models.mt5_position; import app.core.enums.mt5_position; "
+            "import app.core.models.mt5_symbol; import app.core.enums.mt5_symbol; "
+            "import app.core.models.mt5_sizing; import app.core.enums.mt5_sizing",
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -107,6 +112,11 @@ def test_protocol_exposes_no_order_placement_methods() -> None:
     assert members.isdisjoint(forbidden)
 
 
+def test_protocol_exposes_exactly_the_approved_stage_10a_10b_10c_methods() -> None:
+    members = {name for name, _ in inspect.getmembers(MT5ClientProtocol) if not name.startswith("_")}
+    assert members == {"initialize", "runtime_status", "account_facts", "positions", "symbol_facts", "shutdown"}
+
+
 def test_client_source_never_mentions_order_send_or_order_check() -> None:
     source = inspect.getsource(app.mt5.client)
     assert "order_send" not in source
@@ -137,25 +147,35 @@ def test_fake_client_satisfies_protocol() -> None:
     assert isinstance(FakeMT5Client(), MT5ClientProtocol)
 
 
-def test_app_mt5_contains_only_approved_stage_10a_and_10b_files() -> None:
+def test_app_mt5_contains_only_approved_stage_10a_10b_10c_files() -> None:
     package_dir = REPO_ROOT / "app" / "mt5"
     python_files = sorted(p.name for p in package_dir.glob("*.py"))
-    assert python_files == ["__init__.py", "client.py", "errors.py", "persistence.py", "protocols.py", "rollover.py"]
+    assert python_files == [
+        "__init__.py",
+        "client.py",
+        "errors.py",
+        "persistence.py",
+        "protocols.py",
+        "risk.py",
+        "rollover.py",
+        "sizing.py",
+    ]
 
 
-def test_no_10c_through_10e_production_files_present() -> None:
-    """No later Stage 10 sub-stage file (position/symbol normalization,
-    sizing, history, matching) exists yet - 10A/10B own exactly the
-    connectivity/account-identity/rollover surface. ``rollover.py`` is now
-    approved (Stage 10B) and removed from this denylist; every other
-    reserved name remains forbidden."""
+def test_no_10d_through_10e_production_files_present() -> None:
+    """No later Stage 10 sub-stage file (history/deal normalization,
+    order/recommendation matching, position tracking) exists yet - 10A/10B/
+    10C own exactly the connectivity/account-identity/rollover/open-
+    risk/sizing surface. ``risk.py``/``sizing.py`` are now approved (Stage
+    10C) and removed from this denylist; every other reserved name remains
+    forbidden. ``models.py``/``enums.py``/``normalization.py`` remain
+    forbidden permanently - domain models/enums live under ``app/core``,
+    never under ``app/mt5`` (see Stage 10A/10B/10C precedent)."""
     package_dir = REPO_ROOT / "app" / "mt5"
     forbidden_names = {
         "models.py",
         "enums.py",
         "normalization.py",
-        "risk.py",
-        "sizing.py",
         "history.py",
         "matching.py",
         "tracker.py",
