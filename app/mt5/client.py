@@ -143,6 +143,7 @@ class MT5Client:
             trade_allowed=bool(account_info.trade_allowed),
             trade_expert=bool(account_info.trade_expert),
             margin_mode=_normalize_margin_mode(account_info.margin_mode, self._mt5),
+            floating_pnl=Decimal(str(account_info.profit)),
         )
 
     def shutdown(self) -> None:

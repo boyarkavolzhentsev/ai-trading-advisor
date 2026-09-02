@@ -1,9 +1,10 @@
-"""Stage 10A dependency-boundary hygiene.
+"""Stage 10A/10B dependency-boundary hygiene.
 
 Only ``app.mt5.client`` may import ``MetaTrader5``; nothing in ``app.core``
 or Stage 5-9 production packages may import ``app.mt5``; the protocol
 exposes no order-placement surface; and ``app/mt5`` contains exactly its
-approved Stage 10A file set plus the pre-existing stub."""
+approved Stage 10A + 10B file set (rollover transition logic and rollover
+persistence), with every later Stage 10C-E file name still reserved."""
 
 from __future__ import annotations
 
@@ -68,7 +69,13 @@ def test_client_module_has_no_top_level_metatrader5_import() -> None:
 
 def test_pure_mt5_modules_import_without_metatrader5_installed() -> None:
     result = subprocess.run(
-        [sys.executable, "-c", "import app.mt5.protocols; import app.mt5.errors; import app.core.models.mt5_runtime; import app.core.enums.mt5_runtime"],
+        [
+            sys.executable,
+            "-c",
+            "import app.mt5.protocols; import app.mt5.errors; import app.mt5.rollover; import app.mt5.persistence; "
+            "import app.core.models.mt5_runtime; import app.core.enums.mt5_runtime; "
+            "import app.core.models.mt5_rollover; import app.core.enums.mt5_rollover; import app.core.config.mt5_rollover",
+        ],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -130,16 +137,18 @@ def test_fake_client_satisfies_protocol() -> None:
     assert isinstance(FakeMT5Client(), MT5ClientProtocol)
 
 
-def test_app_mt5_contains_only_approved_stage_10a_files() -> None:
+def test_app_mt5_contains_only_approved_stage_10a_and_10b_files() -> None:
     package_dir = REPO_ROOT / "app" / "mt5"
     python_files = sorted(p.name for p in package_dir.glob("*.py"))
-    assert python_files == ["__init__.py", "client.py", "errors.py", "protocols.py"]
+    assert python_files == ["__init__.py", "client.py", "errors.py", "persistence.py", "protocols.py", "rollover.py"]
 
 
-def test_no_10b_through_10e_production_files_present() -> None:
+def test_no_10c_through_10e_production_files_present() -> None:
     """No later Stage 10 sub-stage file (position/symbol normalization,
-    sizing, history, matching) exists yet - 10A owns exactly the
-    connectivity/account-identity surface."""
+    sizing, history, matching) exists yet - 10A/10B own exactly the
+    connectivity/account-identity/rollover surface. ``rollover.py`` is now
+    approved (Stage 10B) and removed from this denylist; every other
+    reserved name remains forbidden."""
     package_dir = REPO_ROOT / "app" / "mt5"
     forbidden_names = {
         "models.py",
@@ -149,7 +158,6 @@ def test_no_10b_through_10e_production_files_present() -> None:
         "sizing.py",
         "history.py",
         "matching.py",
-        "rollover.py",
         "tracker.py",
     }
     present = {p.name for p in package_dir.glob("*.py")}

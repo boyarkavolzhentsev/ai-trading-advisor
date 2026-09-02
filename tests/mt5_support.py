@@ -48,6 +48,7 @@ def default_account_info(
     trade_allowed: bool = True,
     trade_expert: bool = True,
     margin_mode: int = 0,
+    profit: float = 0.0,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         equity=equity,
@@ -59,6 +60,7 @@ def default_account_info(
         trade_allowed=trade_allowed,
         trade_expert=trade_expert,
         margin_mode=margin_mode,
+        profit=profit,
     )
 
 

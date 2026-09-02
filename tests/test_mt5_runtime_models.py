@@ -29,6 +29,7 @@ def _account_facts(**overrides: object) -> MT5AccountFacts:
         "trade_allowed": True,
         "trade_expert": True,
         "margin_mode": AccountPositionMode.NETTING,
+        "floating_pnl": Decimal("0"),
     }
     fields.update(overrides)
     return MT5AccountFacts(**fields)
@@ -122,7 +123,38 @@ def test_account_facts_extra_forbidden() -> None:
             trade_allowed=True,
             trade_expert=True,
             margin_mode=AccountPositionMode.NETTING,
+            floating_pnl=Decimal("0"),
             login=12345,
+        )
+
+
+def test_account_facts_floating_pnl_supports_positive_value() -> None:
+    facts = _account_facts(floating_pnl=Decimal("1234.56"))
+    assert facts.floating_pnl == Decimal("1234.56")
+
+
+def test_account_facts_floating_pnl_supports_negative_value() -> None:
+    facts = _account_facts(floating_pnl=Decimal("-987.65"))
+    assert facts.floating_pnl == Decimal("-987.65")
+
+
+def test_account_facts_floating_pnl_supports_legitimate_zero() -> None:
+    facts = _account_facts(floating_pnl=Decimal("0"))
+    assert facts.floating_pnl == Decimal("0")
+
+
+def test_account_facts_floating_pnl_is_required() -> None:
+    with pytest.raises(ValidationError):
+        MT5AccountFacts(
+            as_of=NOW,
+            equity=Decimal("100000"),
+            balance=Decimal("100000"),
+            margin=Decimal("0"),
+            margin_free=Decimal("100000"),
+            currency="USD",
+            trade_allowed=True,
+            trade_expert=True,
+            margin_mode=AccountPositionMode.NETTING,
         )
 
 

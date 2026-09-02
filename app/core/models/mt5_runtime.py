@@ -59,7 +59,14 @@ class MT5AccountFacts(DomainModel):
     neither is enforced as a policy here - a later stage decides whether
     either should affect recommendation output. ``margin_level`` is ``None``
     when MT5 reports it undefined (no open exposure) - never a fabricated
-    zero. Deliberately excludes account login, account number, server
+    zero. ``floating_pnl`` (Stage 10B amendment) is the account-level
+    floating profit/loss across all open positions as MT5 itself reports it
+    (``account_info().profit``) - signed, never clamped, never defaulted to
+    zero; a flat account with no open exposure legitimately reports an
+    actual ``0``, which is not the same as an unavailable fact (unlike
+    ``margin_level``, MT5 documents no undefined state for this field, so it
+    is populated unconditionally whenever ``account_info()`` itself is
+    available). Deliberately excludes account login, account number, server
     identity and password: no Stage 10A-E responsibility audited so far
     needs account identity (matching is always by ``trade_id``/ticket), so
     none is carried.
@@ -75,6 +82,7 @@ class MT5AccountFacts(DomainModel):
     trade_allowed: bool
     trade_expert: bool
     margin_mode: AccountPositionMode
+    floating_pnl: Decimal
 
 
 class MT5Credentials(DomainModel):
