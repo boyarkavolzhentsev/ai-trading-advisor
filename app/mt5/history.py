@@ -67,10 +67,16 @@ a timestamp that cannot be trusted this far cannot be trusted enough to
 compare against the window either."""
 
 
-def _classify_trading_deal(deal: MT5Deal) -> tuple[Decimal | None, MT5RealizedPnLBlockReason | None]:
+def classify_trading_deal(deal: MT5Deal) -> tuple[Decimal | None, MT5RealizedPnLBlockReason | None]:
     """One ``BUY``/``SELL`` deal's contribution, or the reason it cannot be
-    safely folded into ``realized_daily_pnl``. Returns ``(value, None)`` on
-    success, ``(None, reason)`` on failure - never both, never neither."""
+    safely folded into realized PnL. Returns ``(value, None)`` on success,
+    ``(None, reason)`` on failure - never both, never neither.
+
+    Exported (Stage 10E amendment) so a position-lifecycle-scoped PnL
+    aggregation (``app.mt5.tracker``) can reuse this exact per-deal
+    classification rather than duplicating it - the caller decides which
+    deals to feed it (a trading-day window here, a ``position_id`` lifecycle
+    there); this function itself remains window-agnostic and unchanged."""
     if deal.entry is MT5DealEntry.IN:
         return deal.commission + deal.fee, None
 
@@ -121,7 +127,7 @@ def compute_realized_daily_pnl(
             unsafe_tickets.append(deal.ticket)
             continue
 
-        contribution, reason = _classify_trading_deal(deal)
+        contribution, reason = classify_trading_deal(deal)
         if reason is not None:
             blocked_reason_set.add(reason)
             unsafe_tickets.append(deal.ticket)
@@ -145,4 +151,4 @@ def compute_realized_daily_pnl(
     )
 
 
-__all__ = ["MT5HistoryReadStatus", "compute_realized_daily_pnl"]
+__all__ = ["MT5HistoryReadStatus", "classify_trading_deal", "compute_realized_daily_pnl"]
