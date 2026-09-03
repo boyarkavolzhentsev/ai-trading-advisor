@@ -1,10 +1,11 @@
-"""Stage 10A/10B/10C dependency-boundary hygiene.
+"""Stage 10A/10B/10C/10D dependency-boundary hygiene.
 
 Only ``app.mt5.client`` may import ``MetaTrader5``; nothing in ``app.core``
 or Stage 5-9 production packages may import ``app.mt5``; the protocol
-exposes no order-placement/history surface; and ``app/mt5`` contains exactly
-its approved Stage 10A + 10B + 10C file set (rollover transition/persistence,
-open-risk assessment, broker sizing), with every later Stage 10D-E file name
+exposes no order-placement surface and no order-history surface; and
+``app/mt5`` contains exactly its approved Stage 10A + 10B + 10C + 10D file
+set (rollover transition/persistence, open-risk assessment, broker sizing,
+deal-history realized-PnL assessment), with every later Stage 10E file name
 still reserved."""
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from pathlib import Path
 
 import app.mt5.client
 import app.mt5.errors
+import app.mt5.history
 import app.mt5.protocols
 from app.mt5.client import MT5Client
 from app.mt5.protocols import MT5ClientProtocol
@@ -74,12 +76,13 @@ def test_pure_mt5_modules_import_without_metatrader5_installed() -> None:
             sys.executable,
             "-c",
             "import app.mt5.protocols; import app.mt5.errors; import app.mt5.rollover; import app.mt5.persistence; "
-            "import app.mt5.risk; import app.mt5.sizing; "
+            "import app.mt5.risk; import app.mt5.sizing; import app.mt5.history; "
             "import app.core.models.mt5_runtime; import app.core.enums.mt5_runtime; "
             "import app.core.models.mt5_rollover; import app.core.enums.mt5_rollover; import app.core.config.mt5_rollover; "
             "import app.core.models.mt5_position; import app.core.enums.mt5_position; "
             "import app.core.models.mt5_symbol; import app.core.enums.mt5_symbol; "
-            "import app.core.models.mt5_sizing; import app.core.enums.mt5_sizing",
+            "import app.core.models.mt5_sizing; import app.core.enums.mt5_sizing; "
+            "import app.core.models.mt5_history; import app.core.enums.mt5_history",
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -106,15 +109,19 @@ def test_no_stage_5_to_9_production_package_imports_app_mt5() -> None:
             assert not offending, f"{path.relative_to(REPO_ROOT)} must not import app.mt5: {offending}"
 
 
-def test_protocol_exposes_no_order_placement_methods() -> None:
+def test_protocol_exposes_no_order_placement_or_order_history_methods() -> None:
+    """``history_deals`` is now approved (Stage 10D); ``history_orders``
+    remains forbidden - Stage 10D's deals alone already carry sufficient
+    ``order``/``position_id`` linkage for a future Stage 10E, so no order-
+    history method was ever needed."""
     members = {name for name, _ in inspect.getmembers(MT5ClientProtocol) if not name.startswith("_")}
-    forbidden = {"order_send", "order_check", "open_positions", "symbol_specification", "history_deals", "history_orders"}
+    forbidden = {"order_send", "order_check", "open_positions", "symbol_specification", "history_orders"}
     assert members.isdisjoint(forbidden)
 
 
-def test_protocol_exposes_exactly_the_approved_stage_10a_10b_10c_methods() -> None:
+def test_protocol_exposes_exactly_the_approved_stage_10a_10b_10c_10d_methods() -> None:
     members = {name for name, _ in inspect.getmembers(MT5ClientProtocol) if not name.startswith("_")}
-    assert members == {"initialize", "runtime_status", "account_facts", "positions", "symbol_facts", "shutdown"}
+    assert members == {"initialize", "runtime_status", "account_facts", "positions", "symbol_facts", "history_deals", "shutdown"}
 
 
 def test_client_source_never_mentions_order_send_or_order_check() -> None:
@@ -147,13 +154,14 @@ def test_fake_client_satisfies_protocol() -> None:
     assert isinstance(FakeMT5Client(), MT5ClientProtocol)
 
 
-def test_app_mt5_contains_only_approved_stage_10a_10b_10c_files() -> None:
+def test_app_mt5_contains_only_approved_stage_10a_10b_10c_10d_files() -> None:
     package_dir = REPO_ROOT / "app" / "mt5"
     python_files = sorted(p.name for p in package_dir.glob("*.py"))
     assert python_files == [
         "__init__.py",
         "client.py",
         "errors.py",
+        "history.py",
         "persistence.py",
         "protocols.py",
         "risk.py",
@@ -162,26 +170,53 @@ def test_app_mt5_contains_only_approved_stage_10a_10b_10c_files() -> None:
     ]
 
 
-def test_no_10d_through_10e_production_files_present() -> None:
-    """No later Stage 10 sub-stage file (history/deal normalization,
-    order/recommendation matching, position tracking) exists yet - 10A/10B/
-    10C own exactly the connectivity/account-identity/rollover/open-
-    risk/sizing surface. ``risk.py``/``sizing.py`` are now approved (Stage
-    10C) and removed from this denylist; every other reserved name remains
-    forbidden. ``models.py``/``enums.py``/``normalization.py`` remain
-    forbidden permanently - domain models/enums live under ``app/core``,
-    never under ``app/mt5`` (see Stage 10A/10B/10C precedent)."""
+def test_no_10e_production_files_present() -> None:
+    """No Stage 10E file (recommendation/order matching, position tracking)
+    exists yet - 10A/10B/10C/10D own exactly the connectivity/account-
+    identity/rollover/open-risk/sizing/deal-history-realized-PnL surface.
+    ``history.py`` is now approved (Stage 10D) and removed from this
+    denylist; ``matching.py``/``tracker.py`` remain forbidden.
+    ``models.py``/``enums.py``/``normalization.py`` remain forbidden
+    permanently - domain models/enums live under ``app/core``, never under
+    ``app/mt5`` (see Stage 10A/10B/10C/10D precedent)."""
     package_dir = REPO_ROOT / "app" / "mt5"
     forbidden_names = {
         "models.py",
         "enums.py",
         "normalization.py",
-        "history.py",
         "matching.py",
         "tracker.py",
     }
     present = {p.name for p in package_dir.glob("*.py")}
     assert present.isdisjoint(forbidden_names)
+
+
+def test_no_app_mt5_module_imports_position_record_or_account_risk_snapshot() -> None:
+    """Stage 10D remains a fact producer only: no ``app/mt5`` module may
+    import ``PositionRecord`` (Stage 9's statistics input) or
+    ``AccountRiskSnapshot``/``RiskGate`` (Stage 7's own contracts) -
+    constructing either is explicitly out of Stage 10D's scope."""
+    mt5_package_dir = REPO_ROOT / "app" / "mt5"
+    for path in mt5_package_dir.glob("*.py"):
+        imports = _imports(path)
+        offending = {
+            name
+            for name in imports
+            if name
+            in {
+                "app.core.models.position",
+                "app.core.models.risk_gate_result",
+                "app.risk.engine",
+                "app.risk.protocols",
+            }
+        }
+        assert not offending, f"{path.relative_to(REPO_ROOT)} must not import {offending}"
+
+
+def test_history_module_source_never_mentions_position_record_or_risk_gate() -> None:
+    source = inspect.getsource(app.mt5.history)
+    for forbidden in ("PositionRecord", "AccountRiskSnapshot", "RiskGate"):
+        assert forbidden not in source
 
 
 def test_app_execution_still_contains_only_init() -> None:

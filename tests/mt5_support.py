@@ -86,6 +86,30 @@ class FakeRawMT5Module:
     SYMBOL_TRADE_MODE_CLOSEONLY = 3
     SYMBOL_TRADE_MODE_FULL = 4
 
+    DEAL_TYPE_BUY = 0
+    DEAL_TYPE_SELL = 1
+    DEAL_TYPE_BALANCE = 2
+    DEAL_TYPE_CREDIT = 3
+    DEAL_TYPE_CHARGE = 4
+    DEAL_TYPE_CORRECTION = 5
+    DEAL_TYPE_BONUS = 6
+    DEAL_TYPE_COMMISSION = 7
+    DEAL_TYPE_COMMISSION_DAILY = 8
+    DEAL_TYPE_COMMISSION_MONTHLY = 9
+    DEAL_TYPE_COMMISSION_AGENT_DAILY = 10
+    DEAL_TYPE_COMMISSION_AGENT_MONTHLY = 11
+    DEAL_TYPE_INTEREST = 12
+    DEAL_TYPE_BUY_CANCELED = 13
+    DEAL_TYPE_SELL_CANCELED = 14
+    DEAL_TYPE_DIVIDEND = 15
+    DEAL_TYPE_DIVIDEND_FRANKED = 16
+    DEAL_TYPE_TAX = 17
+
+    DEAL_ENTRY_IN = 0
+    DEAL_ENTRY_OUT = 1
+    DEAL_ENTRY_INOUT = 2
+    DEAL_ENTRY_OUT_BY = 3
+
     _UNSET: Any = object()
 
     def __init__(
@@ -98,6 +122,7 @@ class FakeRawMT5Module:
         positions: tuple[SimpleNamespace, ...] | None = (),
         symbol_info_result: SimpleNamespace | None = None,
         symbol_tick_result: SimpleNamespace | None = None,
+        history_deals_result: tuple[SimpleNamespace, ...] | None = (),
     ) -> None:
         self._initialize_result = initialize_result
         self._terminal_info = default_terminal_info() if terminal_info is self._UNSET else terminal_info
@@ -106,10 +131,12 @@ class FakeRawMT5Module:
         self._positions = positions
         self._symbol_info_result = symbol_info_result
         self._symbol_tick_result = symbol_tick_result
+        self._history_deals_result = history_deals_result
         self.initialize_calls: list[dict[str, Any]] = []
         self.shutdown_calls = 0
         self.symbol_info_calls: list[str] = []
         self.symbol_info_tick_calls: list[str] = []
+        self.history_deals_get_calls: list[tuple[Any, Any]] = []
 
     def initialize(self, **kwargs: Any) -> bool:
         self.initialize_calls.append(kwargs)
@@ -132,6 +159,10 @@ class FakeRawMT5Module:
         self.symbol_info_tick_calls.append(symbol)
         return self._symbol_tick_result
 
+    def history_deals_get(self, date_from: Any, date_to: Any) -> tuple[SimpleNamespace, ...] | None:
+        self.history_deals_get_calls.append((date_from, date_to))
+        return self._history_deals_result
+
     def shutdown(self) -> None:
         self.shutdown_calls += 1
 
@@ -149,11 +180,13 @@ class FakeMT5Client:
         account_facts: MT5AccountFacts | None = None,
         positions_result: tuple[str, tuple[Any, ...]] = ("OK", ()),
         symbol_facts_result: Any | None = None,
+        history_deals_result: tuple[str, tuple[Any, ...]] = ("OK", ()),
     ) -> None:
         self._statuses = statuses or [MT5RuntimeStatus(as_of=NOW, state=MT5ConnectivityState.AVAILABLE)]
         self._account_facts = account_facts
         self._positions_result = positions_result
         self._symbol_facts_result = symbol_facts_result
+        self._history_deals_result = history_deals_result
         self._call_index = 0
 
     def initialize(self) -> MT5RuntimeStatus:
@@ -170,6 +203,9 @@ class FakeMT5Client:
 
     def symbol_facts(self, symbol: str) -> Any | None:
         return self._symbol_facts_result
+
+    def history_deals(self, *, start: Any, end: Any) -> tuple[str, tuple[Any, ...]]:
+        return self._history_deals_result
 
     def shutdown(self) -> None:
         return None

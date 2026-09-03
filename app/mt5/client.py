@@ -1,11 +1,12 @@
-"""Stage 10A/10B/10C read-only MT5 adapter.
+"""Stage 10A/10B/10C/10D read-only MT5 adapter.
 
 The ONLY module in this repository allowed to import ``MetaTrader5`` or hold
 a reference to one of its raw objects. Every raw tuple/object/integer
 constant is normalized into an ``app.core.models.mt5_runtime``/
-``app.core.models.mt5_position``/``app.core.models.mt5_symbol`` value before
-it ever leaves a method here - callers, including every pure Stage 10B-E
-consumer, only ever see the normalized domain models.
+``app.core.models.mt5_position``/``app.core.models.mt5_symbol``/
+``app.core.models.mt5_history`` value before it ever leaves a method here -
+callers, including every pure Stage 10D-E consumer, only ever see the
+normalized domain models.
 
 Construction performs no I/O: it only stores configuration. ``initialize()``
 is the one method that performs the actual ``MetaTrader5.initialize(...)``
@@ -22,17 +23,21 @@ here does exactly one synchronous read and returns.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+from app.core.enums.mt5_history import MT5DealEntry, MT5DealType
 from app.core.enums.mt5_runtime import AccountPositionMode, MT5ConnectivityState
 from app.core.enums.mt5_symbol import MT5SymbolTradeMode
 from app.core.enums.order import OrderSide
+from app.core.models.base import Timestamp
+from app.core.models.mt5_history import MT5Deal
 from app.core.models.mt5_position import MT5Position
 from app.core.models.mt5_runtime import MT5AccountFacts, MT5Credentials, MT5RuntimeStatus
 from app.core.models.mt5_symbol import MT5SymbolFacts
 from app.mt5.errors import MT5NotInitializedError
+from app.mt5.history import MT5HistoryReadStatus
 from app.mt5.risk import MT5PositionsReadStatus
 
 
@@ -87,6 +92,74 @@ def _normalize_trade_mode(raw_trade_mode: int, mt5_module: Any) -> MT5SymbolTrad
         getattr(mt5_module, "SYMBOL_TRADE_MODE_FULL", object()): MT5SymbolTradeMode.FULL,
     }
     return mapping.get(raw_trade_mode, MT5SymbolTradeMode.UNKNOWN)
+
+
+_NON_TRADING_DEAL_TYPE_NAMES: tuple[str, ...] = (
+    "DEAL_TYPE_BALANCE",
+    "DEAL_TYPE_CREDIT",
+    "DEAL_TYPE_CHARGE",
+    "DEAL_TYPE_CORRECTION",
+    "DEAL_TYPE_BONUS",
+    "DEAL_TYPE_COMMISSION",
+    "DEAL_TYPE_COMMISSION_DAILY",
+    "DEAL_TYPE_COMMISSION_MONTHLY",
+    "DEAL_TYPE_COMMISSION_AGENT_DAILY",
+    "DEAL_TYPE_COMMISSION_AGENT_MONTHLY",
+    "DEAL_TYPE_INTEREST",
+    "DEAL_TYPE_BUY_CANCELED",
+    "DEAL_TYPE_SELL_CANCELED",
+    "DEAL_TYPE_DIVIDEND",
+    "DEAL_TYPE_DIVIDEND_FRANKED",
+    "DEAL_TYPE_TAX",
+)
+"""Every known non-trading/account-operation raw ``DEAL_TYPE_*`` name -
+none is individually distinguished by ``MT5DealType`` because none
+individually matters for V1 (see that enum's own docstring)."""
+
+
+def _normalize_deal_type(raw_type: int, mt5_module: Any) -> MT5DealType:
+    """Map the raw ``DEAL_TYPE_*`` integer constant onto ``MT5DealType``.
+    Every known non-trading/account-operation raw type collapses onto
+    ``NON_TRADING``; an unrecognized future raw value maps to ``UNKNOWN`` -
+    never raises, mirroring ``_normalize_trade_mode``'s permissive style
+    (the safety judgment on ``UNKNOWN`` is made downstream, by
+    ``app.mt5.history``, never here)."""
+    mapping: dict[Any, MT5DealType] = {
+        getattr(mt5_module, "DEAL_TYPE_BUY", object()): MT5DealType.BUY,
+        getattr(mt5_module, "DEAL_TYPE_SELL", object()): MT5DealType.SELL,
+    }
+    for name in _NON_TRADING_DEAL_TYPE_NAMES:
+        mapping[getattr(mt5_module, name, object())] = MT5DealType.NON_TRADING
+    return mapping.get(raw_type, MT5DealType.UNKNOWN)
+
+
+def _normalize_deal_entry(raw_entry: int, mt5_module: Any) -> MT5DealEntry:
+    """Map the raw ``DEAL_ENTRY_*`` integer constant onto ``MT5DealEntry``.
+    An unrecognized future raw value maps to ``UNKNOWN`` - never raises,
+    mirroring ``_normalize_deal_type``."""
+    mapping = {
+        getattr(mt5_module, "DEAL_ENTRY_IN", object()): MT5DealEntry.IN,
+        getattr(mt5_module, "DEAL_ENTRY_OUT", object()): MT5DealEntry.OUT,
+        getattr(mt5_module, "DEAL_ENTRY_INOUT", object()): MT5DealEntry.INOUT,
+        getattr(mt5_module, "DEAL_ENTRY_OUT_BY", object()): MT5DealEntry.OUT_BY,
+    }
+    return mapping.get(raw_entry, MT5DealEntry.UNKNOWN)
+
+
+def _normalize_deal_timestamp(time_msc: int) -> Timestamp | None:
+    """Deterministic epoch-millisecond -> aware UTC datetime conversion.
+    Returns ``None`` for a non-positive/unset ``time_msc`` (MT5's own "no
+    value" sentinel, mirroring ``MT5Position.stop_loss``'s ``sl == 0.0``
+    treatment one layer over) or one that fails to convert - the caller
+    (``history_deals()``) fails the whole read closed rather than silently
+    dropping the one malformed deal."""
+    if not time_msc or time_msc <= 0:
+        return None
+    seconds, milliseconds = divmod(int(time_msc), 1000)
+    try:
+        return datetime.fromtimestamp(seconds, tz=UTC) + timedelta(milliseconds=milliseconds)
+    except (OSError, OverflowError, ValueError):
+        return None
 
 
 class MT5Client:
@@ -242,6 +315,45 @@ class MT5Client:
             bid=Decimal(str(tick.bid)),
             ask=Decimal(str(tick.ask)),
         )
+
+    def history_deals(self, *, start: Timestamp, end: Timestamp) -> tuple[MT5HistoryReadStatus, tuple[MT5Deal, ...]]:
+        if not self._initialized or self._mt5 is None:
+            raise MT5NotInitializedError("history_deals() called before a successful initialize()")
+
+        status = self._current_status()
+        if status.state is not MT5ConnectivityState.AVAILABLE:
+            return "UNAVAILABLE", ()
+
+        raw_deals = self._mt5.history_deals_get(start, end)
+        if raw_deals is None:
+            return "UNAVAILABLE", ()
+        if not raw_deals:
+            return "OK", ()
+
+        normalized: list[MT5Deal] = []
+        for raw_deal in raw_deals:
+            deal_time = _normalize_deal_timestamp(raw_deal.time_msc)
+            if deal_time is None:
+                return "MALFORMED_TIMESTAMP", ()
+
+            normalized.append(
+                MT5Deal(
+                    ticket=int(raw_deal.ticket),
+                    order=int(raw_deal.order),
+                    position_id=int(raw_deal.position_id),
+                    time=deal_time,
+                    symbol=raw_deal.symbol or None,
+                    deal_type=_normalize_deal_type(raw_deal.type, self._mt5),
+                    entry=_normalize_deal_entry(raw_deal.entry, self._mt5),
+                    volume=Decimal(str(raw_deal.volume)),
+                    price=Decimal(str(raw_deal.price)),
+                    profit=Decimal(str(raw_deal.profit)),
+                    commission=Decimal(str(raw_deal.commission)),
+                    swap=Decimal(str(raw_deal.swap)),
+                    fee=Decimal(str(getattr(raw_deal, "fee", 0))),
+                )
+            )
+        return "OK", tuple(normalized)
 
     def shutdown(self) -> None:
         if self._mt5 is not None:

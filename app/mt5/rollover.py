@@ -18,7 +18,7 @@ any of them itself.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -62,6 +62,30 @@ def compute_trading_day_key(as_of: Timestamp, policy: MT5RolloverPolicyConfig) -
     broker_local = as_of.astimezone(ZoneInfo(policy.rollover_timezone))
     shifted = broker_local - timedelta(hours=policy.rollover_hour)
     return shifted.date().isoformat()
+
+
+def trading_day_interval(trading_day_key: str, policy: MT5RolloverPolicyConfig) -> tuple[Timestamp, Timestamp]:
+    """The canonical inverse/boundary companion to
+    ``compute_trading_day_key``: the half-open ``[start, end)`` broker-local
+    interval for one trading day, both aware datetimes. ``start`` is the
+    exact rollover-boundary instant that keys onto ``trading_day_key`` via
+    ``compute_trading_day_key``; ``end`` is the same wall-clock instant one
+    calendar day later. Uses the identical ``zoneinfo``-aware arithmetic as
+    ``compute_trading_day_key`` itself (never naive/offset math), so the two
+    functions stay DST-consistent by construction: whatever wall-clock
+    transition ``compute_trading_day_key`` experiences on a given date,
+    ``trading_day_interval`` experiences the same transition when computing
+    ``end`` for the calendar day before it.
+
+    A future caller (e.g. a Stage 10D deal-history read) must derive this
+    interval here rather than re-deriving broker-trading-day boundary math
+    itself - this module remains the sole owner of that policy.
+    """
+    calendar_date = date.fromisoformat(trading_day_key)
+    tz = ZoneInfo(policy.rollover_timezone)
+    start = datetime(calendar_date.year, calendar_date.month, calendar_date.day, policy.rollover_hour, tzinfo=tz)
+    end = start + timedelta(days=1)
+    return start, end
 
 
 def decide_rollover(
@@ -151,4 +175,5 @@ __all__ = [
     "classify_rollover_outcome",
     "compute_trading_day_key",
     "decide_rollover",
+    "trading_day_interval",
 ]
