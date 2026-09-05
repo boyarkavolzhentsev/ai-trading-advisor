@@ -349,14 +349,17 @@ def test_app_execution_still_contains_only_init() -> None:
     assert python_files == ["__init__.py"]
 
 
-def test_app_orchestration_contains_only_approved_runtime_fact_assembly_surface() -> None:
+def test_app_orchestration_contains_only_approved_decision_risk_pipeline_surface() -> None:
     """``app/orchestration`` previously contained only ``__init__.py``
-    (Final Runtime Integration Part A audit's finding); Part B adds the
-    first approved production module, ``facts.py`` (pure Runtime Fact
-    Assembly only - see ``tests/test_orchestration_facts_module_hygiene.py``
-    for its own detailed purity/dependency checks). This assertion
-    intentionally still forbids any unapproved cycle/execution/tracking/
-    feedback/API/Telegram/LLM orchestration module from appearing here."""
+    (Final Runtime Integration Part A audit's finding); Part B added
+    ``facts.py`` (pure Runtime Fact Assembly only - see
+    ``tests/test_orchestration_facts_module_hygiene.py`` for its own detailed
+    purity/dependency checks); Part C adds the second approved production
+    module, ``decision_risk_pipeline.py`` (pure Stage 5-9 orchestration only -
+    see ``tests/test_decision_risk_pipeline_module_hygiene.py`` for its own
+    detailed purity/dependency checks). This assertion intentionally still
+    forbids any unapproved cycle/execution/tracking/feedback/API/Telegram/LLM
+    orchestration module from appearing here."""
     package_dir = REPO_ROOT / "app" / "orchestration"
     python_files = sorted(p.name for p in package_dir.glob("*.py"))
-    assert python_files == ["__init__.py", "facts.py"]
+    assert python_files == ["__init__.py", "decision_risk_pipeline.py", "facts.py"]
