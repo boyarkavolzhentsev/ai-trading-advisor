@@ -368,9 +368,13 @@ def test_app_orchestration_contains_only_approved_final_recommendation_surface()
     ``errors.py`` (input-contract violations only, mirroring
     ``app.risk.errors``); Part E adds ``tracking_integration.py`` (pure
     FinalRecommendation -> Stage 10E tracking-creation integration only -
-    see ``tests/test_tracking_integration_module_hygiene.py``). This
-    assertion intentionally still forbids any unapproved cycle/execution/
-    feedback/API/Telegram/LLM orchestration module from appearing here."""
+    see ``tests/test_tracking_integration_module_hygiene.py``); Part F adds
+    ``runtime_cycle.py`` - the first intentionally IMPURE runtime-cycle
+    coordinator, allowed (unlike every module above) to import ``app.mt5.*``
+    - see ``tests/test_runtime_cycle_module_hygiene.py`` for its own narrower
+    purity checks. This assertion intentionally still forbids any unapproved
+    execution/feedback/API/Telegram/LLM orchestration module from appearing
+    here."""
     package_dir = REPO_ROOT / "app" / "orchestration"
     python_files = sorted(p.name for p in package_dir.glob("*.py"))
     assert python_files == [
@@ -379,5 +383,6 @@ def test_app_orchestration_contains_only_approved_final_recommendation_surface()
         "errors.py",
         "facts.py",
         "final_recommendation.py",
+        "runtime_cycle.py",
         "tracking_integration.py",
     ]
