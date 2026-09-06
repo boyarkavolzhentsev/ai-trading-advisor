@@ -372,15 +372,19 @@ def test_app_orchestration_contains_only_approved_final_recommendation_surface()
     ``runtime_cycle.py`` - the first intentionally IMPURE runtime-cycle
     coordinator, allowed (unlike every module above) to import ``app.mt5.*``
     - see ``tests/test_runtime_cycle_module_hygiene.py`` for its own narrower
-    purity checks. This assertion intentionally still forbids any unapproved
-    execution/feedback/API/Telegram/LLM orchestration module from appearing
-    here."""
+    purity checks. The LLM Explanation Layer adds ``explanation.py`` - a pure
+    builder/fallback module plus one narrow impure orchestration entry point
+    that only ever calls an ``app.llm.protocols.ExplanationLLMClient``, never
+    MT5/persistence - see ``tests/test_explanation_module_hygiene.py``. This
+    assertion intentionally still forbids any unapproved execution/feedback/
+    API/Telegram orchestration module from appearing here."""
     package_dir = REPO_ROOT / "app" / "orchestration"
     python_files = sorted(p.name for p in package_dir.glob("*.py"))
     assert python_files == [
         "__init__.py",
         "decision_risk_pipeline.py",
         "errors.py",
+        "explanation.py",
         "facts.py",
         "final_recommendation.py",
         "runtime_cycle.py",
