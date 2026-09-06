@@ -170,6 +170,11 @@ def test_fake_client_satisfies_protocol() -> None:
 
 
 def test_app_mt5_contains_only_approved_stage_10a_10b_10c_10d_10e_files() -> None:
+    """Final Runtime Integration Part E corrective design adds
+    ``recommendation_provenance_persistence.py`` - an additive sidecar,
+    separate from ``recommendation_persistence.py``, for the durable
+    ``FinalRecommendationProvenance`` record (see
+    ``tests/test_mt5_recommendation_provenance_persistence.py``)."""
     package_dir = REPO_ROOT / "app" / "mt5"
     python_files = sorted(p.name for p in package_dir.glob("*.py"))
     assert python_files == [
@@ -181,6 +186,7 @@ def test_app_mt5_contains_only_approved_stage_10a_10b_10c_10d_10e_files() -> Non
         "persistence.py",
         "protocols.py",
         "recommendation_persistence.py",
+        "recommendation_provenance_persistence.py",
         "risk.py",
         "rollover.py",
         "sizing.py",
@@ -360,9 +366,18 @@ def test_app_orchestration_contains_only_approved_final_recommendation_surface()
     ``final_recommendation.py`` (pure Stage 10C broker-sizing integration
     only - see ``tests/test_final_recommendation_module_hygiene.py``) plus
     ``errors.py`` (input-contract violations only, mirroring
-    ``app.risk.errors``). This assertion intentionally still forbids any
-    unapproved cycle/execution/tracking/feedback/API/Telegram/LLM
-    orchestration module from appearing here."""
+    ``app.risk.errors``); Part E adds ``tracking_integration.py`` (pure
+    FinalRecommendation -> Stage 10E tracking-creation integration only -
+    see ``tests/test_tracking_integration_module_hygiene.py``). This
+    assertion intentionally still forbids any unapproved cycle/execution/
+    feedback/API/Telegram/LLM orchestration module from appearing here."""
     package_dir = REPO_ROOT / "app" / "orchestration"
     python_files = sorted(p.name for p in package_dir.glob("*.py"))
-    assert python_files == ["__init__.py", "decision_risk_pipeline.py", "errors.py", "facts.py", "final_recommendation.py"]
+    assert python_files == [
+        "__init__.py",
+        "decision_risk_pipeline.py",
+        "errors.py",
+        "facts.py",
+        "final_recommendation.py",
+        "tracking_integration.py",
+    ]
