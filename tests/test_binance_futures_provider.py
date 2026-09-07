@@ -15,6 +15,7 @@ import pytest
 
 from app.core.enums.instrument import ContractType
 from app.core.enums.market import Timeframe
+from app.core.models.candle import OHLCVCandle
 from app.market_data.exceptions import (
     InvalidProviderResponseError,
     ProviderUnavailableError,
@@ -247,6 +248,154 @@ def test_get_taker_flow_sell_volume_normalization(now: datetime) -> None:
     assert snapshot.buy_volume == Decimal("7.5")
     assert snapshot.sell_volume == Decimal("5.0")
     assert snapshot.total_volume == Decimal("12.5")
+
+
+# --------------------------------------------------------------------------- #
+# ohlcv
+# --------------------------------------------------------------------------- #
+
+
+def test_get_ohlcv_requests_correct_endpoint_symbol_interval_and_limit(now: datetime) -> None:
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen.update(dict(request.url.params))
+        return httpx.Response(200, json=[_futures_kline_row(now)])
+
+    _provider(handler, now).get_ohlcv("btcusdt", Timeframe.M5, limit=1)
+
+    assert seen["path"] == KLINES_PATH
+    assert seen["symbol"] == "BTCUSDT"
+    assert seen["interval"] == "5m"
+    assert seen["limit"] == "1"
+
+
+def test_get_ohlcv_maps_to_existing_ohlcv_candle(now: datetime) -> None:
+    provider = _provider({KLINES_PATH: [_futures_kline_row(now)]}, now)
+    candles = provider.get_ohlcv("BTCUSDT", Timeframe.M5, limit=1)
+
+    assert len(candles) == 1
+    candle = candles[0]
+    assert isinstance(candle, OHLCVCandle)
+    assert candle.open == Decimal("100.10")
+    assert candle.high == Decimal("105.50")
+    assert candle.low == Decimal("99.90")
+    assert candle.close == Decimal("104.20")
+    assert candle.volume == Decimal("12.5")
+
+
+def test_get_ohlcv_timestamp_comes_from_open_time_not_close_time(now: datetime) -> None:
+    row = _futures_kline_row(now)
+    close_time_field = row[6]
+    provider = _provider({KLINES_PATH: [row]}, now)
+    candle = provider.get_ohlcv("BTCUSDT", Timeframe.M5, limit=1)[0]
+
+    assert candle.timestamp == now
+    assert _millis(candle.timestamp) != close_time_field
+
+
+def test_get_ohlcv_preserves_oldest_first_multi_row_order(now: datetime) -> None:
+    rows = [
+        _futures_kline_row(now - timedelta(minutes=10)),
+        _futures_kline_row(now - timedelta(minutes=5)),
+        _futures_kline_row(now),
+    ]
+    provider = _provider({KLINES_PATH: rows}, now)
+    candles = provider.get_ohlcv("BTCUSDT", Timeframe.M5, limit=3)
+
+    assert [c.timestamp for c in candles] == [
+        now - timedelta(minutes=10),
+        now - timedelta(minutes=5),
+        now,
+    ]
+
+
+def test_get_ohlcv_retains_final_forming_row(now: datetime) -> None:
+    """The provider must remain ignorant of candle closedness: a final row
+    whose close time is still in the future relative to any reference time
+    is returned exactly like every other row - never filtered here."""
+    forming_open_time = now  # close time (open_time + 5min - 1ms) is after `now`
+    provider = _provider({KLINES_PATH: [_futures_kline_row(forming_open_time)]}, now)
+    candles = provider.get_ohlcv("BTCUSDT", Timeframe.M5, limit=1)
+
+    assert len(candles) == 1
+    assert candles[0].timestamp == forming_open_time
+
+
+def test_get_ohlcv_51_candle_response_returns_exactly_51(now: datetime) -> None:
+    rows = [_futures_kline_row(now - timedelta(minutes=5 * i)) for i in range(50, -1, -1)]
+    provider = _provider({KLINES_PATH: rows}, now)
+    candles = provider.get_ohlcv("BTCUSDT", Timeframe.M5, limit=51)
+
+    assert len(candles) == 51
+
+
+def test_get_ohlcv_rejects_empty_response(now: datetime) -> None:
+    provider = _provider({KLINES_PATH: []}, now)
+    with pytest.raises(InvalidProviderResponseError, match="empty OHLCV result"):
+        provider.get_ohlcv("BTCUSDT", Timeframe.M5)
+
+
+def test_get_ohlcv_rejects_non_list_payload(now: datetime) -> None:
+    provider = _provider({KLINES_PATH: {"not": "a list"}}, now)
+    with pytest.raises(InvalidProviderResponseError, match="must be a list"):
+        provider.get_ohlcv("BTCUSDT", Timeframe.M5)
+
+
+def test_get_ohlcv_rejects_short_row(now: datetime) -> None:
+    short_row = _futures_kline_row(now)[:5]  # 5 fields, OHLCV_MIN_FIELDS is 6
+    provider = _provider({KLINES_PATH: [short_row]}, now)
+    with pytest.raises(InvalidProviderResponseError, match="expected at least 6"):
+        provider.get_ohlcv("BTCUSDT", Timeframe.M5)
+
+
+def test_get_ohlcv_rejects_non_numeric_ohlc(now: datetime) -> None:
+    row = _futures_kline_row(now)
+    row[2] = "not-a-number"  # high
+    provider = _provider({KLINES_PATH: [row]}, now)
+    with pytest.raises(InvalidProviderResponseError):
+        provider.get_ohlcv("BTCUSDT", Timeframe.M5)
+
+
+def test_get_ohlcv_sends_unsupported_timeframe_without_request(now: datetime) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover - must not run
+        raise AssertionError("no HTTP request expected")
+
+    with pytest.raises(UnsupportedTimeframeError):
+        _provider(handler, now).get_ohlcv("BTCUSDT", Timeframe.M30)
+
+
+@pytest.mark.parametrize("limit", [0, -1, 1501])
+def test_get_ohlcv_rejects_out_of_range_limit(now: datetime, limit: int) -> None:
+    with pytest.raises(ValueError, match="limit must be between"):
+        _provider({}, now).get_ohlcv("BTCUSDT", Timeframe.M5, limit=limit)
+
+
+@pytest.mark.parametrize("limit", [1, 1500])
+def test_get_ohlcv_accepts_boundary_limits(now: datetime, limit: int) -> None:
+    rows = [_futures_kline_row(now - timedelta(minutes=5 * i)) for i in range(limit - 1, -1, -1)]
+    provider = _provider({KLINES_PATH: rows}, now)
+    candles = provider.get_ohlcv("BTCUSDT", Timeframe.M5, limit=limit)
+    assert len(candles) == limit
+
+
+def test_get_ohlcv_network_failure_is_reported(now: datetime) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("no route", request=request)
+
+    with pytest.raises(ProviderUnavailableError):
+        _provider(handler, now).get_ohlcv("BTCUSDT", Timeframe.M5)
+
+
+def test_get_ohlcv_never_calls_spot_endpoint(now: datetime) -> None:
+    from app.market_data.providers.binance.constants import KLINES_PATH as SPOT_KLINES_PATH
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path != SPOT_KLINES_PATH
+        return httpx.Response(200, json=[_futures_kline_row(now)])
+
+    _provider(handler, now).get_ohlcv("BTCUSDT", Timeframe.M5)
 
 
 # --------------------------------------------------------------------------- #

@@ -48,6 +48,7 @@ def _futures_kline_row(open_time: datetime) -> list[object]:
 @pytest.mark.parametrize(
     ("timeframe", "interval"),
     [
+        (Timeframe.M1, "1m"),
         (Timeframe.M5, "5m"),
         (Timeframe.M15, "15m"),
         (Timeframe.H1, "1h"),
@@ -59,7 +60,7 @@ def test_supported_timeframes_map_to_futures_intervals(timeframe: Timeframe, int
     assert mapper.to_futures_interval(timeframe) == interval
 
 
-@pytest.mark.parametrize("timeframe", [Timeframe.M1, Timeframe.M30, Timeframe.W1])
+@pytest.mark.parametrize("timeframe", [Timeframe.M30, Timeframe.W1])
 def test_unsupported_timeframe_raises(timeframe: Timeframe) -> None:
     with pytest.raises(UnsupportedTimeframeError, match="does not support timeframe"):
         mapper.to_futures_interval(timeframe)
@@ -257,6 +258,77 @@ def test_map_taker_flow_rejects_non_numeric_volume(now: datetime) -> None:
     row[5] = "not-a-number"
     with pytest.raises(InvalidProviderResponseError, match="is not a number"):
         mapper.map_taker_flow([row], symbol="BTCUSDT", timeframe=Timeframe.M5, source=SOURCE)
+
+
+# --------------------------------------------------------------------------- #
+# ohlcv
+#
+# This is the repository-level executable contract for Futures OHLCV
+# mapping: indices 1-4 (open/high/low/close) are explicitly asserted here
+# because, before this corrective stage, they were only corroborated by the
+# shape of the existing _futures_kline_row fixture, never consumed by any
+# production Futures mapper.
+# --------------------------------------------------------------------------- #
+
+
+def test_map_klines_maps_all_ohlcv_fields_from_exact_indices(now: datetime) -> None:
+    row = _futures_kline_row(now)
+    candles = mapper.map_klines([row])
+
+    assert len(candles) == 1
+    candle = candles[0]
+    assert candle.timestamp == now  # row[0], open time - never row[6] close time
+    assert candle.open == Decimal("100.10")  # row[1]
+    assert candle.high == Decimal("105.50")  # row[2]
+    assert candle.low == Decimal("99.90")  # row[3]
+    assert candle.close == Decimal("104.20")  # row[4]
+    assert candle.volume == Decimal("12.5")  # row[5]
+
+
+def test_map_klines_preserves_input_order(now: datetime) -> None:
+    rows = [
+        _futures_kline_row(now),
+        _futures_kline_row(now + timedelta(minutes=5)),
+        _futures_kline_row(now + timedelta(minutes=10)),
+    ]
+    candles = mapper.map_klines(rows)
+    assert [c.timestamp for c in candles] == [now, now + timedelta(minutes=5), now + timedelta(minutes=10)]
+
+
+def test_map_klines_accepts_empty_payload() -> None:
+    assert mapper.map_klines([]) == []
+
+
+def test_map_klines_rejects_non_list_payload() -> None:
+    with pytest.raises(InvalidProviderResponseError, match="must be a list"):
+        mapper.map_klines({"code": -1121})
+
+
+def test_map_klines_rejects_non_list_row(now: datetime) -> None:
+    with pytest.raises(InvalidProviderResponseError, match="row 0 must be a list"):
+        mapper.map_klines(["not-a-row"])
+
+
+def test_map_klines_rejects_short_row(now: datetime) -> None:
+    row = _futures_kline_row(now)[:5]  # 5 fields, OHLCV_MIN_FIELDS is 6
+    with pytest.raises(InvalidProviderResponseError, match="expected at least 6"):
+        mapper.map_klines([row])
+
+
+def test_map_klines_rejects_non_numeric_ohlc(now: datetime) -> None:
+    row = _futures_kline_row(now)
+    row[4] = "not-a-number"  # close
+    with pytest.raises(InvalidProviderResponseError):
+        mapper.map_klines([row])
+
+
+def test_map_klines_does_not_use_taker_flow_min_fields_as_its_own_minimum() -> None:
+    """OHLCV_MIN_FIELDS (6) is deliberately independent of
+    TAKER_FLOW_MIN_FIELDS (11) - the two mappers consume different subsets
+    of the same raw row."""
+    row = [1704067200000, "1", "2", "0.5", "1.5", "10"]  # exactly 6 fields
+    candles = mapper.map_klines([row])
+    assert len(candles) == 1
 
 
 # --------------------------------------------------------------------------- #

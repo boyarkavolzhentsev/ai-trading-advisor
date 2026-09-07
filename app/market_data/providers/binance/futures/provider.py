@@ -14,12 +14,14 @@ liquidation stub.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from types import TracebackType
 from typing import Self
 
 from app.core.enums.market import Timeframe
+from app.core.models.candle import OHLCVCandle
 from app.core.models.data_quality import DataQuality
 from app.core.models.funding import FundingRate
 from app.core.models.open_interest import OpenInterest
@@ -44,6 +46,8 @@ from app.market_data.providers.binance.futures.constants import (
     PROVIDER_NAME,
 )
 from app.market_data.validators import DataQualityValidator
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -142,6 +146,48 @@ class BinanceFuturesMarketDataProvider:
         return mapper.map_taker_flow(
             payload, symbol=requested, timeframe=timeframe, source=provenance.label
         )
+
+    def get_ohlcv(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        limit: int = DEFAULT_OHLCV_LIMIT,
+    ) -> list[OHLCVCandle]:
+        """Return up to ``limit`` closed-or-forming candles, oldest first.
+
+        Mirrors ``BinanceMarketDataProvider.get_ohlcv`` (Spot) exactly:
+        forming-candle exclusion is never performed here - the caller (via
+        ``app.technical.alignment.split_closed_and_forming``) owns that
+        decision. USD-M perpetual futures only, over the same ``/klines``
+        endpoint ``get_taker_flow`` already uses - left completely untouched.
+        """
+        requested = mapper.normalize_symbol(symbol)
+        interval = mapper.to_futures_interval(timeframe)
+        if not 1 <= limit <= MAX_KLINES_LIMIT:
+            raise ValueError(f"limit must be between 1 and {MAX_KLINES_LIMIT}, got {limit}")
+
+        payload = self._client.get(
+            KLINES_PATH, {"symbol": requested, "interval": interval, "limit": limit}
+        )
+        fetched_at = self._clock()
+        provenance = self._provenance(
+            MarketDataSource.KLINES, requested, fetched_at, timeframe=timeframe
+        )
+
+        candles = mapper.map_klines(payload)
+        quality = self._validator.validate_candles(
+            candles, provenance=provenance, timeframe=timeframe, now=fetched_at
+        )
+        self._require_valid(quality, provenance)
+        if quality.is_stale:
+            logger.warning(
+                "stale OHLCV from %s for %s %s: %s",
+                provenance.label,
+                requested,
+                timeframe.value,
+                "; ".join(quality.warnings),
+            )
+        return candles
 
     def get_order_book_snapshot(
         self,

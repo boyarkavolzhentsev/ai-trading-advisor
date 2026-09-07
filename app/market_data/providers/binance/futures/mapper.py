@@ -17,6 +17,7 @@ from typing import Any
 
 from app.core.enums.instrument import ContractType
 from app.core.enums.market import Timeframe
+from app.core.models.candle import OHLCVCandle
 from app.core.models.funding import FundingRate
 from app.core.models.open_interest import OpenInterest
 from app.core.models.order_book import OrderBookLevel, OrderBookSnapshot
@@ -33,6 +34,7 @@ from app.market_data.parsing import (
     to_decimal,
 )
 from app.market_data.providers.binance.futures.constants import (
+    OHLCV_MIN_FIELDS,
     TAKER_FLOW_MIN_FIELDS,
     TIMEFRAME_INTERVALS,
 )
@@ -175,6 +177,50 @@ def map_taker_flow(
     return snapshots
 
 
+def map_klines(payload: Any) -> list[OHLCVCandle]:
+    """Map a futures ``/klines`` payload onto candles, preserving Binance's order.
+
+    Binance returns rows as ``[openTime, open, high, low, close, volume, ...]``
+    with the open time in milliseconds - identical row layout to the Spot
+    klines endpoint for these first six fields (see
+    ``app.market_data.providers.binance.mapper.map_klines``, kept as an
+    independent copy here rather than a cross-import, mirroring this
+    package's existing convention of never importing the Spot mapper).
+    Fields beyond index 5 (close time, quote volume, taker-buy volumes, ...)
+    are not read here - ``app.market_data.providers.binance.futures.mapper.
+    map_taker_flow`` is the sole consumer of those, over the same raw
+    payload shape.
+    """
+    if not isinstance(payload, Sequence) or isinstance(payload, str | bytes):
+        raise InvalidProviderResponseError(
+            f"futures klines payload must be a list, got {type(payload).__name__}"
+        )
+
+    candles: list[OHLCVCandle] = []
+    for index, row in enumerate(payload):
+        if not isinstance(row, Sequence) or isinstance(row, str | bytes):
+            raise InvalidProviderResponseError(
+                f"futures klines row {index} must be a list, got {type(row).__name__}"
+            )
+        if len(row) < OHLCV_MIN_FIELDS:
+            raise InvalidProviderResponseError(
+                f"futures klines row {index} has {len(row)} fields, expected at least {OHLCV_MIN_FIELDS}"
+            )
+        candles.append(
+            build(
+                OHLCVCandle,
+                f"futures klines row {index}",
+                timestamp=timestamp_from_millis(row[0], f"futures klines row {index} open time"),
+                open=to_decimal(row[1], f"futures klines row {index} open"),
+                high=to_decimal(row[2], f"futures klines row {index} high"),
+                low=to_decimal(row[3], f"futures klines row {index} low"),
+                close=to_decimal(row[4], f"futures klines row {index} close"),
+                volume=to_decimal(row[5], f"futures klines row {index} volume"),
+            )
+        )
+    return candles
+
+
 def map_order_book_snapshot(
     payload: Any,
     *,
@@ -228,6 +274,7 @@ def _levels(raw: Any, field: str) -> list[OrderBookLevel]:
 __all__ = [
     "extract_funding_interval_hours",
     "map_funding_rate",
+    "map_klines",
     "map_open_interest",
     "map_order_book_snapshot",
     "map_taker_flow",

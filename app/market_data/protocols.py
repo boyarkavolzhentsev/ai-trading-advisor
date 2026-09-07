@@ -73,6 +73,15 @@ class FuturesMarketDataProvider(Protocol):
         """Return the current total open interest of ``symbol``."""
         ...
 
+    def get_ohlcv(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        limit: int = DEFAULT_OHLCV_LIMIT,
+    ) -> list[OHLCVCandle]:
+        """Return up to ``limit`` most recent candles, oldest first."""
+        ...
+
     def get_taker_flow(
         self,
         symbol: str,

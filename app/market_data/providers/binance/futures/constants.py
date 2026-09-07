@@ -38,6 +38,7 @@ DEFAULT_DEPTH_LIMIT: Final[int] = 100
 
 TIMEFRAME_INTERVALS: Final[Mapping[Timeframe, str]] = MappingProxyType(
     {
+        Timeframe.M1: "1m",
         Timeframe.M5: "5m",
         Timeframe.M15: "15m",
         Timeframe.H1: "1h",
@@ -49,3 +50,9 @@ TIMEFRAME_INTERVALS: Final[Mapping[Timeframe, str]] = MappingProxyType(
 
 TAKER_FLOW_MIN_FIELDS: Final[int] = 11
 """Klines fields needed through ``takerBuyQuoteAssetVolume`` (index 10)."""
+
+OHLCV_MIN_FIELDS: Final[int] = 6
+"""Klines fields needed through ``volume`` (index 5) - open time, open, high,
+low, close, volume. Deliberately independent of ``TAKER_FLOW_MIN_FIELDS``:
+the two mappers consume different subsets of the same raw kline row, so the
+minimum each requires is not shared."""
