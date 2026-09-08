@@ -19,6 +19,18 @@ never copy a fact out in isolation" discipline one layer up.
 ``strategy_session_result`` is present if and only if ``outcome`` is
 ``COMPLETED``: it is the sole carrier of the Stage 7/8/9 audit chain, since
 Stage 7 onward never runs when Runtime Fact Assembly is not ``READY``.
+
+``high_impact_event_risk_result`` (Corrective V1 Integration) is the sole
+surviving, authoritative record of any ``HighImpactEventBlockReason.
+EVENT_WINDOW_OVERLAP`` verdict: no downstream Stage 7/8/9/Final-
+Recommendation result ever carries a reference to it (each only ever sees
+the opaque ``Decimal("0")`` risk-per-unit sentinel and its own stage-local
+reason) - see the approved design report, "Authoritative reason
+preservation". Present whenever the High-Impact Event Risk Gate ran at all
+(i.e. whenever ``strategy_setup_result`` contains at least one
+``CONSTRUCTED`` family), independent of ``outcome`` - the gate runs in the
+same "always runs regardless of account-risk readiness" window as Setup
+Construction itself.
 """
 
 from __future__ import annotations
@@ -30,6 +42,7 @@ from pydantic import model_validator
 from app.core.enums.decision_risk_pipeline import DecisionRiskPipelineOutcome
 from app.core.enums.runtime_fact_assembly import RuntimeFactAssemblyOutcome
 from app.core.models.base import DomainModel
+from app.core.models.high_impact_event import HighImpactEventRiskResult
 from app.core.models.runtime_fact_assembly import AccountRiskSnapshotAssembly
 from app.core.models.session_result import StrategySessionResult
 from app.core.models.setup_construction import StrategySetupResult
@@ -48,6 +61,7 @@ class DecisionRiskPipelineResult(DomainModel):
     strategy_setup_result: StrategySetupResult
     account_risk_snapshot_assembly: AccountRiskSnapshotAssembly
     strategy_session_result: StrategySessionResult | None = None
+    high_impact_event_risk_result: HighImpactEventRiskResult | None = None
 
     @model_validator(mode="after")
     def _validate_outcome_matches_assembly(self) -> Self:

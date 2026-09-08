@@ -8,9 +8,19 @@ components into one pure orchestration sequence:
     -> Stage 6B Judge
     -> Stage 6C Policy Gate
     -> Setup Construction
+    -> High-Impact Event Risk Gate (Corrective V1 Integration)
     -> Stage 7 Risk Gate
     -> Stage 8 Portfolio Supervisor
     -> Stage 9 Session Gate
+
+The High-Impact Event Risk Gate never modifies, wraps, or duplicates
+``app.decision.setup_construction`` - it evaluates the already-produced
+``StrategySetupResult`` unchanged, and bridges its verdict into ``RiskGate``
+via ``app.decision.high_impact_event_gate.to_event_adjusted_candidate_risk_inputs``,
+which itself composes (never modifies) the existing
+``app.decision.setup_construction.to_candidate_risk_inputs``. When no
+``HighImpactEventContext`` is supplied, this pipeline's behavior is
+byte-for-byte equivalent to its pre-existing behavior.
 
 Never reproduces any stage's own business logic: every call below passes an
 already-produced typed result straight into the next stage's own existing
@@ -48,6 +58,7 @@ from app.core.models.base import Timestamp
 from app.core.models.decision_risk_pipeline import DecisionRiskPipelineResult
 from app.core.models.external_intelligence_supervisor_result import ExternalIntelligenceSupervisorResult
 from app.core.models.flow_supervisor_result import FlowSupervisorResult
+from app.core.models.high_impact_event import HighImpactEventContext, HighImpactEventSymbolScopeConfig
 from app.core.models.market_evaluation_context import MarketEvaluationContext
 from app.core.models.market_structure_features import MarketStructureFeatures
 from app.core.models.mt5_symbol import MT5SymbolFacts
@@ -55,7 +66,8 @@ from app.core.models.runtime_fact_assembly import AccountRiskSnapshotAssembly
 from app.core.models.technical_supervisor_result import TechnicalSupervisorResult
 from app.core.config.trading_cycle import TradingCycleConfig
 from app.decision.gate import PolicyGate
-from app.decision.setup_construction import SetupConstruction, to_candidate_risk_inputs
+from app.decision.high_impact_event_gate import HighImpactEventGate, to_event_adjusted_candidate_risk_inputs
+from app.decision.setup_construction import SetupConstruction
 from app.diversification.supervisor import PortfolioSupervisor
 from app.judge.judge import Judge
 from app.market_evaluation.evaluator import MarketEvaluator
@@ -76,14 +88,29 @@ def evaluate_decision_risk_pipeline(
     account_risk_snapshot_assembly: AccountRiskSnapshotAssembly,
     trading_cycle_config: TradingCycleConfig,
     locked_override: bool = False,
+    high_impact_event_context: HighImpactEventContext | None = None,
+    high_impact_event_symbol_scope_config: HighImpactEventSymbolScopeConfig | None = None,
 ) -> DecisionRiskPipelineResult:
     """Run one cycle's Stage 5-9 decision/risk chain.
 
     ``evaluation_time`` is the one coherent caller-supplied cycle timestamp:
-    it is passed unchanged as Stage 5's own ``evaluation_time`` and as Setup
-    Construction's own ``as_of`` - neither contract requires a second,
-    independent timestamp, and no tolerance/coherence policy is invented
-    between them.
+    it is passed unchanged as Stage 5's own ``evaluation_time``, as Setup
+    Construction's own ``as_of``, and as the High-Impact Event Risk Gate's
+    own ``as_of`` - no contract requires a second, independent timestamp,
+    and no tolerance/coherence policy is invented between them.
+
+    ``high_impact_event_context`` defaults to ``None`` - omitting it leaves
+    this pipeline's behavior byte-for-byte equivalent to its pre-existing
+    behavior (``to_event_adjusted_candidate_risk_inputs`` returns its base
+    ``to_candidate_risk_inputs`` output unchanged whenever the gate result
+    carries no ``BLOCKED`` family, which is always true when no context was
+    supplied). ``high_impact_event_symbol_scope_config`` is the explicit,
+    caller-supplied ``event_code -> symbols`` relevance policy for event
+    codes with no typed-context-derivable scope (currently only
+    ``EIA_CRUDE_INVENTORIES`` - see ``app.decision.high_impact_event_gate``);
+    it defaults to ``None`` (no override entries configured), in which case
+    those event codes simply never match any symbol - never a guessed
+    default.
     """
     market_evaluation = MarketEvaluator().evaluate(
         flow=flow,
@@ -101,18 +128,25 @@ def evaluate_decision_risk_pipeline(
         symbol_facts=symbol_facts,
         m15_market_structure=m15_market_structure,
     )
+    high_impact_event_risk_result = HighImpactEventGate().evaluate(
+        strategy_setup_result=strategy_setup_result,
+        context=high_impact_event_context,
+        as_of=evaluation_time,
+        symbol_scope_config=high_impact_event_symbol_scope_config,
+    )
 
     if account_risk_snapshot_assembly.outcome is not RuntimeFactAssemblyOutcome.READY:
         return DecisionRiskPipelineResult(
             outcome=DecisionRiskPipelineOutcome.BLOCKED_BEFORE_RISK,
             strategy_setup_result=strategy_setup_result,
             account_risk_snapshot_assembly=account_risk_snapshot_assembly,
+            high_impact_event_risk_result=high_impact_event_risk_result,
         )
 
     account_snapshot = account_risk_snapshot_assembly.account_snapshot
     assert account_snapshot is not None  # guaranteed by RuntimeFactAssemblyOutcome.READY
 
-    candidate_risk_inputs = to_candidate_risk_inputs(strategy_setup_result)
+    candidate_risk_inputs = to_event_adjusted_candidate_risk_inputs(strategy_setup_result, high_impact_event_risk_result)
 
     strategy_risk_result = RiskGate().evaluate(
         strategy_policy_result=strategy_policy_result,
@@ -131,6 +165,7 @@ def evaluate_decision_risk_pipeline(
         strategy_setup_result=strategy_setup_result,
         account_risk_snapshot_assembly=account_risk_snapshot_assembly,
         strategy_session_result=strategy_session_result,
+        high_impact_event_risk_result=high_impact_event_risk_result,
     )
 
 

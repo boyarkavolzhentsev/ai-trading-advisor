@@ -53,6 +53,7 @@ from app.core.enums.trade import TradeStatus
 from app.core.models.base import Symbol, Timestamp
 from app.core.models.external_intelligence_supervisor_result import ExternalIntelligenceSupervisorResult
 from app.core.models.flow_supervisor_result import FlowSupervisorResult
+from app.core.models.high_impact_event import HighImpactEventContext, HighImpactEventSymbolScopeConfig
 from app.core.models.market_evaluation_context import MarketEvaluationContext
 from app.core.models.market_structure_features import MarketStructureFeatures
 from app.core.models.mt5_history import MT5Deal
@@ -254,16 +255,23 @@ def run_runtime_cycle(
     external: ExternalIntelligenceSupervisorResult | None = None,
     m15_market_structure: MarketStructureFeatures | None = None,
     locked_override: bool = False,
+    high_impact_event_context: HighImpactEventContext | None = None,
+    high_impact_event_symbol_scope_config: HighImpactEventSymbolScopeConfig | None = None,
 ) -> RuntimeCycleResult:
     """Run exactly one deterministic runtime cycle.
 
     ``as_of`` is the one caller-supplied cycle timestamp - never read from
     the wall clock here - threaded unchanged into every pure call that
     accepts ``as_of``/``evaluation_time``. ``flow``/``technical``/``external``/
-    ``m15_market_structure`` are already-produced Stage 1-4/technical-analysis
-    upstream results supplied by the caller: this coordinator never fetches
-    Binance/news/macro/on-chain/external-intelligence data itself - it is
-    runtime (MT5) orchestration only.
+    ``m15_market_structure``/``high_impact_event_context``/
+    ``high_impact_event_symbol_scope_config`` are already-produced upstream
+    results/static config supplied by the caller: this coordinator never
+    fetches Binance/news/macro/on-chain/external-intelligence/high-impact-
+    event-bridge data itself, and never derives symbol relevance policy
+    itself - it is runtime (MT5) orchestration only. In particular, no file
+    is ever read here: the MQL5 calendar bridge file-reader adapter
+    (``app.high_impact_event_bridge``) remains strictly upstream of this
+    module.
     """
     runtime_status = client.initialize()
     try:
@@ -381,6 +389,8 @@ def run_runtime_cycle(
                 account_risk_snapshot_assembly=account_risk_snapshot_assembly,
                 trading_cycle_config=trading_cycle_config,
                 locked_override=locked_override,
+                high_impact_event_context=high_impact_event_context,
+                high_impact_event_symbol_scope_config=high_impact_event_symbol_scope_config,
             )
 
         # --- Final Recommendation (Stage 10C sizing, unmodified) ---

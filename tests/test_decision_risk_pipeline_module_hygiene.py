@@ -109,6 +109,8 @@ def test_evaluate_decision_risk_pipeline_signature_takes_only_explicit_facts() -
         "account_risk_snapshot_assembly",
         "trading_cycle_config",
         "locked_override",
+        "high_impact_event_context",
+        "high_impact_event_symbol_scope_config",
     }
 
 
