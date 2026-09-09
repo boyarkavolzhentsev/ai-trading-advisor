@@ -194,8 +194,30 @@ def _is_relevant(
     return _EVENT_CODE_SCOPE.get(event.event_code) in scope_tags
 
 
+_IMPORTANCE_RANK: Final[Mapping[HighImpactEventImportance, int]] = {
+    HighImpactEventImportance.NONE: 0,
+    HighImpactEventImportance.LOW: 1,
+    HighImpactEventImportance.MODERATE: 2,
+    HighImpactEventImportance.HIGH: 3,
+}
+
+_HARD_BLOCK_MIN_IMPORTANCE_OVERRIDE: Final[Mapping[str, HighImpactEventImportance]] = {
+    "FOMC": HighImpactEventImportance.MODERATE,
+}
+"""Narrowest exception to the HIGH-only hard-block eligibility rule below -
+MetaQuotes reports ``fomc-meeting-statement`` as MODERATE (never rewritten;
+see ``HighImpactEventRecord.importance``'s own docstring), yet it must still
+be BLOCK-eligible under the approved FOMC policy. ``fomc-press-conference``
+is HIGH and remains BLOCK-eligible through the unchanged default path. No
+other hard-block canonical code appears here - every other code keeps the
+implicit HIGH-only minimum."""
+
+
 def _is_hard_block_eligible(event: HighImpactEventRecord) -> bool:
-    return event.event_code in HARD_BLOCK_EVENT_CODES and event.importance is HighImpactEventImportance.HIGH
+    if event.event_code not in HARD_BLOCK_EVENT_CODES:
+        return False
+    minimum_importance = _HARD_BLOCK_MIN_IMPORTANCE_OVERRIDE.get(event.event_code, HighImpactEventImportance.HIGH)
+    return _IMPORTANCE_RANK[event.importance] >= _IMPORTANCE_RANK[minimum_importance]
 
 
 def _overlaps(signal_time: Timestamp, valid_until: Timestamp, window_start: Timestamp, window_end: Timestamp) -> bool:
