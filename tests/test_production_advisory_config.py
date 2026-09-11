@@ -11,14 +11,24 @@ from pydantic import ValidationError
 
 from app.core.config.high_impact_event_bridge import HighImpactEventCalendarTimezoneConfig
 from app.llm.openai_client import OpenAIExplanationClientConfig
-from app.production_advisory.config import CALENDAR_STALENESS_THRESHOLD_DEFAULT, ProductionAdvisoryConfig
+from app.production_advisory.config import CALENDAR_STALENESS_THRESHOLD_DEFAULT, ProductionAdvisoryConfig, SymbolMapping
 from tests.production_advisory_support import build_config
 
 
-def test_single_authoritative_symbol_is_required() -> None:
-    assert ProductionAdvisoryConfig.model_fields["symbol"].is_required()
-    config = build_config(symbol="BTCUSDT")
-    assert config.symbol == "BTCUSDT"
+def test_single_authoritative_symbol_mapping_is_required() -> None:
+    """Corrective design closure ("PROVIDER SYMBOL SPLIT + PRICE-BASIS
+    RECONCILIATION"): one fixed SymbolMapping, never a bare ambiguous
+    ``symbol`` string, is the sole authoritative instrument identity."""
+    assert ProductionAdvisoryConfig.model_fields["symbol_mapping"].is_required()
+    mapping = SymbolMapping(logical_symbol="BTC", binance_symbol="BTCUSDT", mt5_symbol="BTCUSDt")
+    config = build_config(symbol_mapping=mapping)
+    assert config.symbol_mapping.logical_symbol == "BTC"
+    assert config.symbol_mapping.binance_symbol == "BTCUSDT"
+    assert config.symbol_mapping.mt5_symbol == "BTCUSDt"
+
+
+def test_max_price_basis_divergence_percent_is_required() -> None:
+    assert ProductionAdvisoryConfig.model_fields["max_price_basis_divergence_percent"].is_required()
 
 
 def test_calendar_staleness_threshold_defaults_to_fifteen_minutes() -> None:
@@ -77,4 +87,4 @@ def test_llm_enabled_with_config_accepted() -> None:
 def test_config_is_frozen() -> None:
     config = build_config()
     with pytest.raises(ValidationError):
-        config.symbol = "OTHER"  # type: ignore[misc]
+        config.max_price_basis_divergence_percent = 999  # type: ignore[misc]

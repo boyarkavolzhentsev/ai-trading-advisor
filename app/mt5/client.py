@@ -307,6 +307,7 @@ class MT5Client:
             symbol=symbol,
             trade_tick_size=Decimal(str(symbol_info.trade_tick_size)),
             trade_tick_value_loss=Decimal(str(symbol_info.trade_tick_value_loss)),
+            point=Decimal(str(symbol_info.point)),
             volume_min=Decimal(str(symbol_info.volume_min)),
             volume_max=Decimal(str(symbol_info.volume_max)),
             volume_step=Decimal(str(symbol_info.volume_step)),

@@ -64,7 +64,7 @@ _LifecycleState = Literal["NEW", "STARTED", "STOPPED"]
 
 def _default_flow_bootstrap(config: ProductionAdvisoryConfig, rest_client: BinanceRestClient) -> FlowRealtimeBootstrap:
     return FlowRealtimeBootstrap(
-        config=FlowRealtimeBootstrapConfig(symbol=config.symbol, contract_type=config.contract_type),
+        config=FlowRealtimeBootstrapConfig(symbol=config.symbol_mapping.binance_symbol, contract_type=config.contract_type),
         rest_client=rest_client,
     )
 
@@ -74,7 +74,7 @@ def _default_technical_composer(
 ) -> TechnicalProductionComposer:
     provider = BinanceFuturesMarketDataProvider(rest_client)
     return TechnicalProductionComposer(
-        config=TechnicalProductionConfig(symbol=config.symbol, contract_type=config.contract_type),
+        config=TechnicalProductionConfig(symbol=config.symbol_mapping.binance_symbol, contract_type=config.contract_type),
         provider=provider,
     )
 
@@ -242,11 +242,19 @@ class ProductionAdvisoryComposer:
                 # fetch failure discards the entire Technical result for
                 # this cycle rather than trusting retained-but-unprovably-
                 # fresh Stage 3A history. Never a partial per-cell patch.
+                # binance_reference_price is discarded in lockstep (corrective
+                # design closure, "PROVIDER SYMBOL SPLIT + PRICE-BASIS
+                # RECONCILIATION") - a retained old M15 close must never
+                # survive independently into Setup Construction once this
+                # cycle's own Technical contour has been safety-discarded;
+                # that would be a hidden stale-reference-price seam.
                 technical = None
                 m15_market_structure = None
+                binance_reference_price = None
             else:
                 technical = technical_result.technical
                 m15_market_structure = technical_result.m15_market_structure
+                binance_reference_price = technical_result.m15_last_closed_close
 
             high_impact_event_context = read_high_impact_event_context(
                 self._config.calendar_bridge_path,
@@ -256,7 +264,7 @@ class ProductionAdvisoryComposer:
             )
 
             context = MarketEvaluationContext(
-                symbol=self._config.symbol,
+                symbol=self._config.symbol_mapping.binance_symbol,
                 contract_type=self._config.contract_type,
                 base_asset=self._config.base_asset,
                 network=self._config.network,
@@ -274,6 +282,9 @@ class ProductionAdvisoryComposer:
                 market=self._config.market,
                 trade_ids=trade_ids,
                 context=context,
+                mt5_symbol=self._config.symbol_mapping.mt5_symbol,
+                binance_reference_price=binance_reference_price,
+                max_price_basis_divergence_percent=self._config.max_price_basis_divergence_percent,
                 flow=flow_result,
                 technical=technical,
                 external=None,
@@ -318,7 +329,8 @@ class ProductionAdvisoryComposer:
 
             return ProductionAdvisoryCycleResult(
                 as_of=as_of,
-                symbol=self._config.symbol,
+                symbol=self._config.symbol_mapping.logical_symbol,
+                market_data_symbol=self._config.symbol_mapping.binance_symbol,
                 outcome=outcome,
                 runtime_cycle_result=runtime_cycle_result,
                 explanation_result=explanation_result,

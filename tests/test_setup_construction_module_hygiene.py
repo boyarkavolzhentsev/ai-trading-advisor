@@ -92,7 +92,16 @@ def test_setup_construction_never_calls_metatrader5_client_or_symbol_facts_itsel
 
 def test_setup_construction_construct_signature_takes_only_explicit_facts() -> None:
     signature = inspect.signature(SetupConstruction.construct)
-    assert set(signature.parameters) == {"self", "strategy_policy_result", "as_of", "symbol_facts", "m15_market_structure"}
+    assert set(signature.parameters) == {
+        "self",
+        "strategy_policy_result",
+        "as_of",
+        "symbol_facts",
+        "m15_market_structure",
+        "broker_symbol",
+        "binance_reference_price",
+        "max_price_basis_divergence_percent",
+    }
 
 
 def test_setup_construction_importable_as_pure_module_subprocess() -> None:

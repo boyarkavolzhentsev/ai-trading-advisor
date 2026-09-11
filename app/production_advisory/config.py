@@ -23,7 +23,7 @@ from app.core.config.mt5_rollover import MT5RolloverPolicyConfig
 from app.core.config.trading_cycle import TradingCycleConfig
 from app.core.enums.instrument import ContractType
 from app.core.enums.market import MarketType
-from app.core.models.base import DomainModel, Symbol
+from app.core.models.base import DomainModel, Percent, Symbol
 from app.core.models.economic_event import CurrencyCode
 from app.core.models.high_impact_event import HighImpactEventSymbolScopeConfig
 from app.core.models.instrument import Asset
@@ -34,6 +34,27 @@ CALENDAR_STALENESS_THRESHOLD_DEFAULT: Final[timedelta] = timedelta(minutes=15)
 """Approved V1 default (Calendar Bridge staleness-target closure): 5-minute
 producer cadence, one missed refresh tolerated, sustained outage observable
 soon enough to matter."""
+
+
+class SymbolMapping(DomainModel):
+    """One fixed instrument's three distinct, never-interchangeable
+    identities (corrective design closure, "PROVIDER SYMBOL SPLIT + PRICE-
+    BASIS RECONCILIATION"): provider-native symbol strings must never be
+    silently treated as interchangeable.
+
+    ``logical_symbol`` is operator-facing only - fed to no provider, no
+    algorithm, no persistence key. ``binance_symbol`` is the only symbol
+    Flow/Technical/``MarketEvaluationContext`` ever see. ``mt5_symbol`` is
+    the only symbol MT5 ``symbol_facts``/the netting guard/Setup
+    Construction's broker-facing identity/tracking/Stage 10E matching ever
+    see. No registry, no multi-instrument lookup: exactly one fixed mapping
+    per process, mirroring ``ProductionAdvisoryConfig``'s own existing
+    "one fixed symbol per process" design.
+    """
+
+    logical_symbol: Symbol
+    binance_symbol: Symbol
+    mt5_symbol: Symbol
 
 
 class ProductionAdvisoryConfig(DomainModel):
@@ -47,12 +68,24 @@ class ProductionAdvisoryConfig(DomainModel):
     a real provider client from partial/absent configuration.
     """
 
-    symbol: Symbol
+    symbol_mapping: SymbolMapping
     contract_type: ContractType
     market: MarketType
     base_asset: Asset | None = None
     network: str | None = None
     currency_exposures: tuple[CurrencyCode, ...] = ()
+
+    max_price_basis_divergence_percent: Percent
+    """Required, no default (corrective design closure, "PROVIDER SYMBOL
+    SPLIT + PRICE-BASIS RECONCILIATION"): the maximum tolerated divergence
+    between the MT5 entry price and the Binance M15 reference price before
+    Setup Construction refuses to translate a structural stop onto MT5's
+    price axis (``SetupBlockReason.PRICE_BASIS_DIVERGENCE``). A wrong
+    default would silently mask a real, evolving venue basis - mirrors
+    ``MT5RolloverPolicyConfig.rollover_timezone``'s own "no default" rationale.
+    This is deliberately NOT chosen by this codebase: it must be set by the
+    operator from observed BTCUSDT/BTCUSDt basis behavior before any
+    ACTIONABLE-capable live run."""
 
     rollover_policy: MT5RolloverPolicyConfig
     trading_cycle_config: TradingCycleConfig = TradingCycleConfig()
@@ -87,4 +120,4 @@ class ProductionAdvisoryConfig(DomainModel):
         return self
 
 
-__all__ = ["CALENDAR_STALENESS_THRESHOLD_DEFAULT", "ProductionAdvisoryConfig"]
+__all__ = ["CALENDAR_STALENESS_THRESHOLD_DEFAULT", "ProductionAdvisoryConfig", "SymbolMapping"]

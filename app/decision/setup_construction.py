@@ -9,15 +9,17 @@ the filesystem, or the wall clock, never performs I/O - a pure, synchronous,
 stateless function of its explicit inputs only.
 
 Reads only ``PolicyFamilyVerdict``, the already-authorized
-``JudgeFamilyResult.direction``, and two caller-supplied facts a future
-runtime orchestrator gathers once per cycle and reuses unchanged: one MT5
-symbol-facts read (``MT5SymbolFacts``) and one M15 ``MarketStructureFeatures``
+``JudgeFamilyResult.direction``, and caller-supplied facts a future runtime
+orchestrator gathers once per cycle and reuses unchanged: one MT5
+symbol-facts read (``MT5SymbolFacts``), one M15 ``MarketStructureFeatures``
 block from the SAME Stage 3A computation already run this cycle to feed
-Judge - never a second, independent read of either, and never any other
-Technical/Flow/External Intelligence fact. Whether a family's structural
-thesis has a defensible entry/stop is exactly the information this module is
-allowed to act on; which direction a family favors is Stage 6B Judge's
-question, answered upstream, never re-asked here.
+Judge, the broker-facing symbol identity, the Binance M15 reference price,
+and the operator's price-basis-divergence tolerance - never a second,
+independent read of any of these, and never any other Technical/Flow/
+External Intelligence fact. Whether a family's structural thesis has a
+defensible entry/stop is exactly the information this module is allowed to
+act on; which direction a family favors is Stage 6B Judge's question,
+answered upstream, never re-asked here.
 
 Direction is never decided here (``DirectionalCandidate ->
 TradeDirection`` is a fixed, total, fail-closed mapping of Judge's own
@@ -30,12 +32,28 @@ lot size, and never calls ``app.mt5.sizing``.
 ``FAMILY_SETUP_UNAVAILABLE`` abstentions: no ATR/percentage/arbitrary
 fallback stop is ever computed for either, per the approved Setup
 Construction design.
+
+Price-basis reconciliation (corrective design closure, "PROVIDER SYMBOL
+SPLIT + PRICE-BASIS RECONCILIATION"): ``entry_price`` is, and remains, MT5
+``symbol_facts.ask``/``.bid`` - the only authoritative executable-price
+basis. The structural stop selectors below still choose a Binance absolute
+price level (``binance_structural_stop``) - but that raw value is NEVER
+used as ``CandidateTradeSetup.stop_loss`` directly. It is first converted
+into a distance on Binance's own price axis (``binance_reference_price -
+binance_structural_stop``, or the mirror for SHORT), then that distance
+alone is re-applied to the MT5 entry price to produce an MT5-anchored stop -
+no cross-venue absolute subtraction ever reaches ``_validate_geometry``/
+``_compute_risk_per_unit``/``CandidateTradeSetup``/Stage 10C. The broker-
+facing symbol identity (``CandidateTradeSetup.symbol``) is likewise supplied
+explicitly by the caller (``broker_symbol``) - never derived from
+``MarketEvaluationContext.symbol``, which remains the Binance analytical
+identity and is never treated as broker-facing.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from decimal import Decimal
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 
 from app.core.config.constants import SIGNAL_EXECUTION_WINDOW
 from app.core.enums.policy_gate import PolicyFamilyVerdict
@@ -81,7 +99,11 @@ def _blocked(family: StrategyFamily, reason: SetupBlockReason) -> SetupConstruct
 def _symbol_facts_usable(symbol_facts: MT5SymbolFacts | None) -> bool:
     if symbol_facts is None:
         return False
-    return symbol_facts.trade_tick_size > 0 and symbol_facts.trade_tick_value_loss > 0
+    return (
+        symbol_facts.trade_tick_size > 0
+        and symbol_facts.trade_tick_value_loss > 0
+        and symbol_facts.point > 0
+    )
 
 
 def _structure_usable(market_structure: MarketStructureFeatures | None) -> bool:
@@ -92,6 +114,62 @@ def _structure_usable(market_structure: MarketStructureFeatures | None) -> bool:
 
 def _resolve_entry_price(direction: TradeDirection, symbol_facts: MT5SymbolFacts) -> Decimal:
     return symbol_facts.ask if direction is TradeDirection.LONG else symbol_facts.bid
+
+
+def _translate_binance_distance_to_mt5_stop(
+    direction: TradeDirection,
+    *,
+    mt5_entry_price: Decimal,
+    binance_reference_price: Decimal,
+    binance_structural_stop: Decimal,
+) -> Decimal | None:
+    """The one seam a raw Binance absolute price is ever converted into an
+    MT5-anchored one. Returns ``None`` when the Binance-side distance is not
+    strictly positive - never a negative/zero distance re-applied to MT5's
+    entry price, which would silently invert or collapse the stop."""
+    if direction is TradeDirection.LONG:
+        distance = binance_reference_price - binance_structural_stop
+    else:
+        distance = binance_structural_stop - binance_reference_price
+    if distance <= 0:
+        return None
+    return mt5_entry_price - distance if direction is TradeDirection.LONG else mt5_entry_price + distance
+
+
+def _broker_stop_distance(direction: TradeDirection, symbol_facts: MT5SymbolFacts, stop_loss: Decimal) -> Decimal:
+    """Broker minimum-stop-distance validation is measured from the CURRENT
+    opposite-side market quote at the same snapshot - never from the
+    (already-committed) entry price, and never a bare ``abs()`` of the two
+    (corrective review, "MT5 BROKER STOP-LEVEL SEMANTICS"). A LONG's entry
+    is the ask, but its protective stop is measured against the bid (the
+    price the position would actually close at); symmetrically for SHORT.
+    This is a distinct concept from ``_compute_risk_per_unit``'s own
+    ``abs(entry_price - stop_loss)``, which prices planned risk from the
+    entry the trade will actually fill at - never conflated with this
+    broker-mechanics check."""
+    if direction is TradeDirection.LONG:
+        return symbol_facts.bid - stop_loss
+    return stop_loss - symbol_facts.ask
+
+
+def _minimum_broker_stop_distance(symbol_facts: MT5SymbolFacts) -> Decimal:
+    """``trade_stops_level`` is a count of POINTS (``SYMBOL_POINT``), never
+    ticks (``SYMBOL_TRADE_TICK_SIZE``) - real MetaTrader5 semantics document
+    these as distinct symbol properties that must never be assumed
+    identical (corrective review, "MT5 BROKER STOP-LEVEL SEMANTICS")."""
+    return Decimal(symbol_facts.trade_stops_level) * symbol_facts.point
+
+
+def _round_stop_to_tick(price: Decimal, direction: TradeDirection, trade_tick_size: Decimal) -> Decimal:
+    """Direction-safe tick normalization: always rounds AWAY from entry,
+    never toward it, mirroring ``app.mt5.sizing.floor_volume_to_step``'s own
+    "never round in the operator's favor" precedent - a tick-alignment
+    adjustment can only ever widen, never narrow, the realized stop
+    distance. Decimal-safe throughout; no float conversion. Caller
+    guarantees ``trade_tick_size > 0`` (``_symbol_facts_usable``)."""
+    ticks = price / trade_tick_size
+    rounding = ROUND_FLOOR if direction is TradeDirection.LONG else ROUND_CEILING
+    return ticks.to_integral_value(rounding=rounding) * trade_tick_size
 
 
 def _select_trend_following_stop(direction: TradeDirection, market_structure: MarketStructureFeatures) -> Decimal | None:
@@ -138,11 +216,13 @@ def _construct_structural_family(
     *,
     family: StrategyFamily,
     trade_direction: TradeDirection,
-    symbol: Symbol,
+    broker_symbol: Symbol,
     as_of: Timestamp,
     symbol_facts: MT5SymbolFacts | None,
     m15_market_structure: MarketStructureFeatures | None,
     select_stop: _StopSelector,
+    binance_reference_price: Decimal | None,
+    max_price_basis_divergence_percent: Decimal,
 ) -> SetupConstructionResult:
     if not _symbol_facts_usable(symbol_facts):
         return _blocked(family, SetupBlockReason.SHARED_FACT_UNAVAILABLE)
@@ -152,21 +232,50 @@ def _construct_structural_family(
         return _blocked(family, SetupBlockReason.SHARED_FACT_UNAVAILABLE)
     assert m15_market_structure is not None  # narrowed by _structure_usable
 
-    stop_loss = select_stop(trade_direction, m15_market_structure)
-    if stop_loss is None:
-        return _blocked(family, SetupBlockReason.MISSING_STOP_REFERENCE)
+    if binance_reference_price is None or binance_reference_price <= 0:
+        return _blocked(family, SetupBlockReason.SHARED_FACT_UNAVAILABLE)
 
     entry_price = _resolve_entry_price(trade_direction, symbol_facts)
 
+    basis_gap_percent = (abs(entry_price - binance_reference_price) / binance_reference_price) * 100
+    if basis_gap_percent > max_price_basis_divergence_percent:
+        return _blocked(family, SetupBlockReason.PRICE_BASIS_DIVERGENCE)
+
+    binance_structural_stop = select_stop(trade_direction, m15_market_structure)
+    if binance_structural_stop is None:
+        return _blocked(family, SetupBlockReason.MISSING_STOP_REFERENCE)
+
+    translated_stop = _translate_binance_distance_to_mt5_stop(
+        trade_direction,
+        mt5_entry_price=entry_price,
+        binance_reference_price=binance_reference_price,
+        binance_structural_stop=binance_structural_stop,
+    )
+    if translated_stop is None:
+        # A non-positive Binance-side distance means the selected structural
+        # level sits on the wrong side of (or exactly at) the Binance
+        # reference price - the same "wrong side of current price" condition
+        # _validate_geometry checks post-translation on the MT5 axis, just
+        # detected here, on the axis the raw fact actually originates from,
+        # before a translation that would otherwise be undefined/inverted.
+        return _blocked(family, SetupBlockReason.INVALID_STOP_SIDE)
+
+    stop_loss = _round_stop_to_tick(translated_stop, trade_direction, symbol_facts.trade_tick_size)
+
     if not _validate_geometry(trade_direction, entry_price, stop_loss):
         return _blocked(family, SetupBlockReason.INVALID_STOP_SIDE)
+
+    broker_stop_distance = _broker_stop_distance(trade_direction, symbol_facts, stop_loss)
+    minimum_stop_distance = _minimum_broker_stop_distance(symbol_facts)
+    if broker_stop_distance < minimum_stop_distance:
+        return _blocked(family, SetupBlockReason.BROKER_STOP_DISTANCE)
 
     risk_per_unit = _compute_risk_per_unit(entry_price, stop_loss, symbol_facts)
 
     setup = CandidateTradeSetup(
         family=family,
         direction=trade_direction,
-        symbol=symbol,
+        symbol=broker_symbol,
         entry_price=entry_price,
         stop_loss=stop_loss,
         take_profit_levels=(),
@@ -188,9 +297,21 @@ class SetupConstruction:
         as_of: Timestamp,
         symbol_facts: MT5SymbolFacts | None,
         m15_market_structure: MarketStructureFeatures | None,
+        broker_symbol: Symbol,
+        binance_reference_price: Decimal | None,
+        max_price_basis_divergence_percent: Decimal,
     ) -> StrategySetupResult:
-        symbol = strategy_policy_result.strategy_judge_result.strategy_router_result.market_evaluation.context.symbol
-
+        """``broker_symbol`` is the caller-supplied MT5 broker-facing symbol
+        (corrective design closure, "PROVIDER SYMBOL SPLIT + PRICE-BASIS
+        RECONCILIATION") - never derived from
+        ``market_evaluation.context.symbol``, which remains the Binance
+        analytical identity Flow/Technical/Market Evaluation were keyed by
+        and is never treated as broker-facing. ``binance_reference_price``
+        is ``None`` whenever the current cycle's own Technical contour was
+        safety-discarded (mirrors ``m15_market_structure`` being ``None`` in
+        that same case) - every structure-capable family then blocks
+        ``SHARED_FACT_UNAVAILABLE``, never falls back to a stale retained
+        value."""
         family_results: list[SetupConstructionResult] = []
         for policy_result, judge_result in zip(
             strategy_policy_result.family_results,
@@ -220,11 +341,13 @@ class SetupConstruction:
                 _construct_structural_family(
                     family=family,
                     trade_direction=trade_direction,
-                    symbol=symbol,
+                    broker_symbol=broker_symbol,
                     as_of=as_of,
                     symbol_facts=symbol_facts,
                     m15_market_structure=m15_market_structure,
                     select_stop=select_stop,
+                    binance_reference_price=binance_reference_price,
+                    max_price_basis_divergence_percent=max_price_basis_divergence_percent,
                 )
             )
 

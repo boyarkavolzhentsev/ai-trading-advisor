@@ -20,7 +20,10 @@ from app.core.enums.instrument import ContractType
 from app.core.enums.market import MarketType
 
 _MINIMAL_ENV = {
-    "ADVISORY_SYMBOL": "EURUSD",
+    "ADVISORY_LOGICAL_SYMBOL": "EURUSD",
+    "ADVISORY_BINANCE_SYMBOL": "EURUSD",
+    "ADVISORY_MT5_SYMBOL": "EURUSD",
+    "MAX_PRICE_BASIS_DIVERGENCE_PERCENT": "100",
     "ADVISORY_CONTRACT_TYPE": "PERPETUAL",
     "ADVISORY_MARKET": "FX",
     "MT5_ROLLOVER_TIMEZONE": "UTC",
@@ -31,7 +34,10 @@ _MINIMAL_ENV = {
 
 def _set_minimal_env(monkeypatch: pytest.MonkeyPatch, **overrides: str | None) -> None:
     for name in (
-        "ADVISORY_SYMBOL",
+        "ADVISORY_LOGICAL_SYMBOL",
+        "ADVISORY_BINANCE_SYMBOL",
+        "ADVISORY_MT5_SYMBOL",
+        "MAX_PRICE_BASIS_DIVERGENCE_PERCENT",
         "ADVISORY_CONTRACT_TYPE",
         "ADVISORY_MARKET",
         "MT5_ROLLOVER_TIMEZONE",
@@ -62,7 +68,10 @@ def _set_minimal_env(monkeypatch: pytest.MonkeyPatch, **overrides: str | None) -
 def test_minimal_required_env_builds_valid_config(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_minimal_env(monkeypatch)
     config = build_production_advisory_config_from_env()
-    assert config.symbol == "EURUSD"
+    assert config.symbol_mapping.logical_symbol == "EURUSD"
+    assert config.symbol_mapping.binance_symbol == "EURUSD"
+    assert config.symbol_mapping.mt5_symbol == "EURUSD"
+    assert config.max_price_basis_divergence_percent == 100
     assert config.contract_type is ContractType.PERPETUAL
     assert config.market is MarketType.FX
     assert config.rollover_policy.rollover_timezone == "UTC"
@@ -217,8 +226,20 @@ def test_invalid_market_fails_sanitized(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_missing_required_var_message_names_the_variable(monkeypatch: pytest.MonkeyPatch) -> None:
-    _set_minimal_env(monkeypatch, ADVISORY_SYMBOL=None)
-    with pytest.raises(BootstrapConfigurationError, match="ADVISORY_SYMBOL"):
+    _set_minimal_env(monkeypatch, ADVISORY_LOGICAL_SYMBOL=None)
+    with pytest.raises(BootstrapConfigurationError, match="ADVISORY_LOGICAL_SYMBOL"):
+        build_production_advisory_config_from_env()
+
+
+def test_missing_max_price_basis_divergence_percent_fails_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_minimal_env(monkeypatch, MAX_PRICE_BASIS_DIVERGENCE_PERCENT=None)
+    with pytest.raises(BootstrapConfigurationError, match="MAX_PRICE_BASIS_DIVERGENCE_PERCENT"):
+        build_production_advisory_config_from_env()
+
+
+def test_invalid_max_price_basis_divergence_percent_fails_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_minimal_env(monkeypatch, MAX_PRICE_BASIS_DIVERGENCE_PERCENT="not-a-number")
+    with pytest.raises(BootstrapConfigurationError, match="MAX_PRICE_BASIS_DIVERGENCE_PERCENT"):
         build_production_advisory_config_from_env()
 
 

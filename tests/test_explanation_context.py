@@ -198,6 +198,9 @@ def test_advanced_tracking_currency_matches_account_facts_for_arbitrary_currency
         market=MarketType.CRYPTO,
         trade_ids={},
         context=_context(),
+        mt5_symbol="BTCUSDT",
+        binance_reference_price=None,
+        max_price_basis_divergence_percent=Decimal("100"),
     )
 
     cards = build_tracking_cards(result)
@@ -252,6 +255,9 @@ def test_advanced_tracking_currency_none_when_account_facts_unavailable_pnl_pres
         market=MarketType.CRYPTO,
         trade_ids={},
         context=_context(),
+        mt5_symbol="BTCUSDT",
+        binance_reference_price=None,
+        max_price_basis_divergence_percent=Decimal("100"),
     )
 
     assert result.account_facts is None

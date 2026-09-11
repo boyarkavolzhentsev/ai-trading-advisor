@@ -13,15 +13,29 @@ from app.core.enums.quality import FeatureQuality
 from app.core.enums.technical import SwingKind
 from app.core.enums.trade import TradeDirection
 from app.decision.setup_construction import SetupConstruction
-from tests.setup_construction_support import AS_OF, result_for, swing, symbol_facts, trend_following_policy_result, usable_market_structure
+from tests.setup_construction_support import (
+    AS_OF,
+    MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
+    SYMBOL,
+    reference_price_for,
+    result_for,
+    swing,
+    symbol_facts,
+    trend_following_policy_result,
+    usable_market_structure,
+)
 
 
-def _construct(policy_result, *, market_structure, facts=None):
+def _construct(policy_result, *, market_structure, facts=None, direction=TradeDirection.LONG):
+    facts = facts if facts is not None else symbol_facts()
     return SetupConstruction().construct(
         strategy_policy_result=policy_result,
         as_of=AS_OF,
-        symbol_facts=facts if facts is not None else symbol_facts(),
+        symbol_facts=facts,
         m15_market_structure=market_structure,
+        broker_symbol=SYMBOL,
+        binance_reference_price=reference_price_for(direction, facts),
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
 
 
@@ -47,7 +61,9 @@ def test_short_uses_latest_high_swing_by_candle_time() -> None:
     ms = usable_market_structure(swings=(older, latest))
     facts = symbol_facts(ask=Decimal("100.5"), bid=Decimal("100"))
 
-    result = result_for(_construct(policy, market_structure=ms, facts=facts), StrategyFamily.TREND_FOLLOWING)
+    result = result_for(
+        _construct(policy, market_structure=ms, facts=facts, direction=TradeDirection.SHORT), StrategyFamily.TREND_FOLLOWING
+    )
 
     assert result.outcome is SetupConstructionOutcome.CONSTRUCTED
     assert result.setup.stop_loss == Decimal("112")

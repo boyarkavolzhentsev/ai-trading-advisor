@@ -336,6 +336,7 @@ def production_advisory_cycle_result(
     return ProductionAdvisoryCycleResult(
         as_of=AS_OF,
         symbol=SYMBOL,
+        market_data_symbol=SYMBOL,
         outcome=outcome,
         runtime_cycle_result=rcr,
         explanation_result=explanation_result(),

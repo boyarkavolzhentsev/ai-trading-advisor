@@ -52,9 +52,11 @@ typed output into the next stage's own typed input parameter.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from app.core.enums.decision_risk_pipeline import DecisionRiskPipelineOutcome
 from app.core.enums.runtime_fact_assembly import RuntimeFactAssemblyOutcome
-from app.core.models.base import Timestamp
+from app.core.models.base import Symbol, Timestamp
 from app.core.models.decision_risk_pipeline import DecisionRiskPipelineResult
 from app.core.models.external_intelligence_supervisor_result import ExternalIntelligenceSupervisorResult
 from app.core.models.flow_supervisor_result import FlowSupervisorResult
@@ -85,6 +87,9 @@ def evaluate_decision_risk_pipeline(
     evaluation_time: Timestamp,
     symbol_facts: MT5SymbolFacts | None,
     m15_market_structure: MarketStructureFeatures | None,
+    broker_symbol: Symbol,
+    binance_reference_price: Decimal | None,
+    max_price_basis_divergence_percent: Decimal,
     account_risk_snapshot_assembly: AccountRiskSnapshotAssembly,
     trading_cycle_config: TradingCycleConfig,
     locked_override: bool = False,
@@ -98,6 +103,13 @@ def evaluate_decision_risk_pipeline(
     Construction's own ``as_of``, and as the High-Impact Event Risk Gate's
     own ``as_of`` - no contract requires a second, independent timestamp,
     and no tolerance/coherence policy is invented between them.
+
+    ``broker_symbol``/``binance_reference_price``/
+    ``max_price_basis_divergence_percent`` are threaded straight into Setup
+    Construction unchanged (corrective design closure, "PROVIDER SYMBOL
+    SPLIT + PRICE-BASIS RECONCILIATION") - ``context.symbol`` remains the
+    Binance analytical identity Stage 5 was already keyed by and is never
+    reused as the broker-facing identity.
 
     ``high_impact_event_context`` defaults to ``None`` - omitting it leaves
     this pipeline's behavior byte-for-byte equivalent to its pre-existing
@@ -127,6 +139,9 @@ def evaluate_decision_risk_pipeline(
         as_of=evaluation_time,
         symbol_facts=symbol_facts,
         m15_market_structure=m15_market_structure,
+        broker_symbol=broker_symbol,
+        binance_reference_price=binance_reference_price,
+        max_price_basis_divergence_percent=max_price_basis_divergence_percent,
     )
     high_impact_event_risk_result = HighImpactEventGate().evaluate(
         strategy_setup_result=strategy_setup_result,

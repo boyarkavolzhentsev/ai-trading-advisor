@@ -13,6 +13,8 @@ from app.core.enums.technical import SwingKind
 from app.decision.setup_construction import SetupConstruction
 from tests.setup_construction_support import (
     AS_OF,
+    MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
+    SYMBOL,
     event_driven_policy_result,
     mean_reversion_synthetic_policy_result,
     result_for,
@@ -22,13 +24,24 @@ from tests.setup_construction_support import (
     usable_market_structure,
 )
 
+_REFERENCE_PRICE = Decimal("100")
+"""Arbitrary valid placeholder: every test in this file blocks (family
+abstention or Policy-exclusion) before Setup Construction ever consults
+binance_reference_price, so its exact value is immaterial here."""
+
 
 def test_event_driven_blocked_family_setup_unavailable_with_facts_present() -> None:
     policy = event_driven_policy_result()
     ms = usable_market_structure(swings=(swing(kind=SwingKind.LOW, price=Decimal("95")),))
 
     setup_result = SetupConstruction().construct(
-        strategy_policy_result=policy, as_of=AS_OF, symbol_facts=symbol_facts(), m15_market_structure=ms
+        strategy_policy_result=policy,
+        as_of=AS_OF,
+        symbol_facts=symbol_facts(),
+        m15_market_structure=ms,
+        broker_symbol=SYMBOL,
+        binance_reference_price=_REFERENCE_PRICE,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
     result = result_for(setup_result, StrategyFamily.EVENT_DRIVEN)
 
@@ -42,7 +55,13 @@ def test_event_driven_blocked_family_setup_unavailable_with_facts_absent() -> No
     policy = event_driven_policy_result()
 
     setup_result = SetupConstruction().construct(
-        strategy_policy_result=policy, as_of=AS_OF, symbol_facts=None, m15_market_structure=None
+        strategy_policy_result=policy,
+        as_of=AS_OF,
+        symbol_facts=None,
+        m15_market_structure=None,
+        broker_symbol=SYMBOL,
+        binance_reference_price=_REFERENCE_PRICE,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
     result = result_for(setup_result, StrategyFamily.EVENT_DRIVEN)
 
@@ -59,7 +78,13 @@ def test_mean_reversion_defensive_blocked_family_setup_unavailable() -> None:
     ms = usable_market_structure(swings=(swing(kind=SwingKind.LOW, price=Decimal("95")),))
 
     setup_result = SetupConstruction().construct(
-        strategy_policy_result=policy, as_of=AS_OF, symbol_facts=symbol_facts(), m15_market_structure=ms
+        strategy_policy_result=policy,
+        as_of=AS_OF,
+        symbol_facts=symbol_facts(),
+        m15_market_structure=ms,
+        broker_symbol=SYMBOL,
+        binance_reference_price=_REFERENCE_PRICE,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
     result = result_for(setup_result, StrategyFamily.MEAN_REVERSION)
 
@@ -74,7 +99,13 @@ def test_policy_blocked_family_receives_no_setup_result() -> None:
     policy = trend_following_policy_result(direction="UPWARD")
 
     setup_result = SetupConstruction().construct(
-        strategy_policy_result=policy, as_of=AS_OF, symbol_facts=symbol_facts(), m15_market_structure=None
+        strategy_policy_result=policy,
+        as_of=AS_OF,
+        symbol_facts=symbol_facts(),
+        m15_market_structure=None,
+        broker_symbol=SYMBOL,
+        binance_reference_price=_REFERENCE_PRICE,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
 
     families = {r.family for r in setup_result.family_results}

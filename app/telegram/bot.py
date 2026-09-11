@@ -94,7 +94,7 @@ def run() -> None:
     allowlist = build_telegram_allowlist_from_env()
     config = build_production_advisory_config_from_env()
     service = build_production_advisory_service()
-    application = build_bot(token=token, service=service, symbol=config.symbol, allowlist=allowlist)
+    application = build_bot(token=token, service=service, symbol=config.symbol_mapping.logical_symbol, allowlist=allowlist)
     application.run_polling()
 
 

@@ -40,6 +40,7 @@ via an invented block reason.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from decimal import Decimal
 
 from app.core.config.mt5_rollover import MT5RolloverPolicyConfig
 from app.core.config.trading_cycle import TradingCycleConfig
@@ -250,6 +251,9 @@ def run_runtime_cycle(
     market: MarketType,
     trade_ids: Mapping[StrategyFamily, str],
     context: MarketEvaluationContext,
+    mt5_symbol: Symbol,
+    binance_reference_price: Decimal | None,
+    max_price_basis_divergence_percent: Decimal,
     flow: FlowSupervisorResult | None = None,
     technical: TechnicalSupervisorResult | None = None,
     external: ExternalIntelligenceSupervisorResult | None = None,
@@ -272,6 +276,16 @@ def run_runtime_cycle(
     is ever read here: the MQL5 calendar bridge file-reader adapter
     (``app.high_impact_event_bridge``) remains strictly upstream of this
     module.
+
+    ``mt5_symbol`` (corrective design closure, "PROVIDER SYMBOL SPLIT +
+    PRICE-BASIS RECONCILIATION") is the broker-facing symbol every MT5 read
+    (``symbol_facts``), the netting guard, and Setup Construction's
+    broker-facing identity use - deliberately distinct from ``context.symbol``,
+    which remains the Binance analytical identity Flow/Technical/Market
+    Evaluation were already keyed by. ``binance_reference_price``/
+    ``max_price_basis_divergence_percent`` are threaded unchanged into Setup
+    Construction (via the Decision/Risk Pipeline) - this coordinator never
+    computes or interprets either itself.
     """
     runtime_status = client.initialize()
     try:
@@ -349,7 +363,7 @@ def run_runtime_cycle(
             )
 
         # --- symbol facts: deduplicated, at most once per unique symbol ---
-        target_symbol = context.symbol
+        target_symbol = mt5_symbol
         unique_symbols: set[str] = {target_symbol}
         if positions_read_status == "OK":
             unique_symbols |= {position.symbol for position in positions}
@@ -386,6 +400,9 @@ def run_runtime_cycle(
                 evaluation_time=as_of,
                 symbol_facts=symbol_facts_by_symbol.get(target_symbol),
                 m15_market_structure=m15_market_structure,
+                broker_symbol=mt5_symbol,
+                binance_reference_price=binance_reference_price,
+                max_price_basis_divergence_percent=max_price_basis_divergence_percent,
                 account_risk_snapshot_assembly=account_risk_snapshot_assembly,
                 trading_cycle_config=trading_cycle_config,
                 locked_override=locked_override,

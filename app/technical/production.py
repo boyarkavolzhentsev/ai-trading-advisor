@@ -36,6 +36,7 @@ conditions from genuine bugs.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 
 from app.core.enums.instrument import ContractType
 from app.core.enums.market import Timeframe
@@ -117,10 +118,23 @@ class TechnicalProductionResult:
     populated object, carrying ``UNAVAILABLE`` quality on empty history
     rather than being omitted). Carries no raw per-timeframe snapshot and no
     trading decision field of any kind.
-    """
+
+    ``m15_last_closed_close`` (corrective design closure, "PROVIDER SYMBOL
+    SPLIT + PRICE-BASIS RECONCILIATION") is the Binance M15 reference price
+    Setup Construction needs to translate a Binance structural stop onto
+    MT5's own price axis - the retained M15 candle store's own most recent
+    CLOSED candle close, never the forming candle, never an extra REST call.
+    ``None`` only when zero M15 history has ever been retained (the very
+    first cycles). The caller (``ProductionAdvisoryComposer``) is
+    responsible for forcing this to ``None`` alongside
+    ``technical``/``m15_market_structure`` whenever the current cycle's own
+    Technical contour was safety-discarded for a fetch failure - this field
+    alone never distinguishes "fresh" from "stale-but-retained" for that
+    decision (see the composer's own discard policy)."""
 
     technical: TechnicalSupervisorResult
     m15_market_structure: MarketStructureFeatures
+    m15_last_closed_close: Decimal | None
     fetch_failures: tuple[TechnicalFetchFailure, ...]
 
 
@@ -170,6 +184,7 @@ class TechnicalProductionComposer:
         results = []
         fetch_failures: list[TechnicalFetchFailure] = []
         m15_snapshot = None
+        m15_last_closed_close: Decimal | None = None
 
         for timeframe in DEFAULT_TECHNICAL_TIMEFRAMES:
             try:
@@ -192,6 +207,14 @@ class TechnicalProductionComposer:
             )
             if timeframe is Timeframe.M15:
                 m15_snapshot = snapshot
+                # Read AFTER record_candles above, so a successful fetch this
+                # cycle is reflected immediately - never the forming candle,
+                # never an extra REST call (the retained store already holds
+                # exactly what this cycle's own closed-candle processing just
+                # produced, or whatever was already retained on a fetch
+                # failure for this timeframe).
+                m15_retained = self._engine.history_for(symbol, contract_type, Timeframe.M15).candles.latest()
+                m15_last_closed_close = m15_retained[-1].close if m15_retained else None
 
             for analyst in _ANALYSTS:
                 results.append(analyst.analyze(snapshot))
@@ -202,6 +225,7 @@ class TechnicalProductionComposer:
         return TechnicalProductionResult(
             technical=technical,
             m15_market_structure=m15_snapshot.market_structure,
+            m15_last_closed_close=m15_last_closed_close,
             fetch_failures=tuple(fetch_failures),
         )
 

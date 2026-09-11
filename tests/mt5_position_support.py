@@ -47,6 +47,7 @@ def default_symbol_facts(**overrides: object) -> MT5SymbolFacts:
         "symbol": "EURUSD",
         "trade_tick_size": Decimal("0.00001"),
         "trade_tick_value_loss": Decimal("1"),
+        "point": Decimal("0.00001"),
         "volume_min": Decimal("0.01"),
         "volume_max": Decimal("100"),
         "volume_step": Decimal("0.01"),
@@ -84,6 +85,7 @@ def default_raw_symbol_info(
     *,
     trade_tick_size: float = 0.00001,
     trade_tick_value_loss: float = 1.0,
+    point: float = 0.00001,
     volume_min: float = 0.01,
     volume_max: float = 100.0,
     volume_step: float = 0.01,
@@ -93,6 +95,7 @@ def default_raw_symbol_info(
     return SimpleNamespace(
         trade_tick_size=trade_tick_size,
         trade_tick_value_loss=trade_tick_value_loss,
+        point=point,
         volume_min=volume_min,
         volume_max=volume_max,
         volume_step=volume_step,

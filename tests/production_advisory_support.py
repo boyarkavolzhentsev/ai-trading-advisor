@@ -8,6 +8,7 @@ MT5, or the network.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
@@ -21,7 +22,7 @@ from app.core.models.mt5_runtime import MT5RuntimeStatus
 from app.core.models.stream_health import StreamHealth
 from app.flow.open_interest_poller import TaskHealth, TaskState
 from app.flow.realtime_bootstrap import FlowRealtimeBootstrapHealth
-from app.production_advisory.config import ProductionAdvisoryConfig
+from app.production_advisory.config import ProductionAdvisoryConfig, SymbolMapping
 from app.technical.production import TechnicalFetchFailure, TechnicalProductionResult
 
 AS_OF = datetime(2026, 1, 2, 14, 30, 0, tzinfo=UTC)
@@ -36,9 +37,10 @@ def all_trade_ids(prefix: str = "TID") -> dict[StrategyFamily, str]:
 
 def build_config(**overrides: object) -> ProductionAdvisoryConfig:
     fields: dict[str, object] = {
-        "symbol": "EURUSD",
+        "symbol_mapping": SymbolMapping(logical_symbol="EURUSD", binance_symbol="EURUSD", mt5_symbol="EURUSD"),
         "contract_type": ContractType.PERPETUAL,
         "market": MarketType.FX,
+        "max_price_basis_divergence_percent": Decimal("100"),
         "rollover_policy": MT5RolloverPolicyConfig(rollover_timezone="UTC"),
         "rollover_state_path": Path("rollover_state.json"),
         "tracking_directory": Path("tracking"),
@@ -92,8 +94,14 @@ class FakeTechnicalComposer:
     """Returns a caller-configured ``fetch_failures`` tuple; records every
     ``as_of`` it was called with."""
 
-    def __init__(self, fetch_failures: tuple[TechnicalFetchFailure, ...] = ()) -> None:
+    def __init__(
+        self,
+        fetch_failures: tuple[TechnicalFetchFailure, ...] = (),
+        *,
+        m15_last_closed_close: Decimal | None = Decimal("100"),
+    ) -> None:
         self.fetch_failures = fetch_failures
+        self.m15_last_closed_close = m15_last_closed_close
         self.build_calls: list[object] = []
         self.sentinel_technical = object()
         self.sentinel_m15 = object()
@@ -103,6 +111,7 @@ class FakeTechnicalComposer:
         return TechnicalProductionResult(
             technical=self.sentinel_technical,  # type: ignore[arg-type]
             m15_market_structure=self.sentinel_m15,  # type: ignore[arg-type]
+            m15_last_closed_close=self.m15_last_closed_close,
             fetch_failures=self.fetch_failures,
         )
 

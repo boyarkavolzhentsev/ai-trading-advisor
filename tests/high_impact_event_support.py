@@ -130,7 +130,15 @@ def constructed_setup_result(*, context: MarketEvaluationContext, as_of: datetim
         swings=(swing(kind=SwingKind.LOW, price=Decimal("95"), candle_time=as_of - timedelta(hours=1)),), symbol=context.symbol
     )
     facts = _symbol_facts(symbol=context.symbol, ask=Decimal("110"), bid=Decimal("109.5"))
-    return SetupConstruction().construct(strategy_policy_result=policy, as_of=as_of, symbol_facts=facts, m15_market_structure=ms)
+    return SetupConstruction().construct(
+        strategy_policy_result=policy,
+        as_of=as_of,
+        symbol_facts=facts,
+        m15_market_structure=ms,
+        broker_symbol=context.symbol,
+        binance_reference_price=Decimal("110"),
+        max_price_basis_divergence_percent=Decimal("100"),
+    )
 
 
 def constructed_setup_result_with_event_driven_blocked(*, context: MarketEvaluationContext, as_of: datetime) -> StrategySetupResult:
@@ -148,7 +156,15 @@ def constructed_setup_result_with_event_driven_blocked(*, context: MarketEvaluat
         swings=(swing(kind=SwingKind.LOW, price=Decimal("95"), candle_time=as_of - timedelta(hours=1)),), symbol=context.symbol
     )
     facts = _symbol_facts(symbol=context.symbol, ask=Decimal("110"), bid=Decimal("109.5"))
-    return SetupConstruction().construct(strategy_policy_result=policy, as_of=as_of, symbol_facts=facts, m15_market_structure=ms)
+    return SetupConstruction().construct(
+        strategy_policy_result=policy,
+        as_of=as_of,
+        symbol_facts=facts,
+        m15_market_structure=ms,
+        broker_symbol=context.symbol,
+        binance_reference_price=Decimal("110"),
+        max_price_basis_divergence_percent=Decimal("100"),
+    )
 
 
 __all__ = [

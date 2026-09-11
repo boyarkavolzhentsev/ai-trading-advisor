@@ -215,6 +215,128 @@ async def test_old_valid_retained_technical_fake_cannot_bypass_policy(monkeypatc
     assert calls[0]["m15_market_structure"] is None
 
 
+# --- binance_reference_price discard safety (corrective design closure,
+# "PROVIDER SYMBOL SPLIT + PRICE-BASIS RECONCILIATION") ----------------------
+
+
+@pytest.mark.asyncio
+async def test_empty_fetch_failures_passes_binance_reference_price_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    from decimal import Decimal
+
+    from tests.production_advisory_support import FakeTechnicalComposer
+
+    calls = _fake_run_runtime_cycle(monkeypatch)
+    technical_composer = FakeTechnicalComposer(fetch_failures=(), m15_last_closed_close=Decimal("12345.6"))
+    composer = _make_composer(technical_composer=technical_composer)
+    await composer.startup()
+    await composer.run_cycle(as_of=AS_OF, trade_ids=all_trade_ids())
+
+    assert calls[0]["binance_reference_price"] == Decimal("12345.6")
+
+
+@pytest.mark.asyncio
+async def test_any_fetch_failure_forces_binance_reference_price_none_even_with_retained_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The exact mandatory regression this corrective design closure calls
+    for: a retained old M15 close must never survive independently into
+    Setup Construction once the current cycle's own Technical contour has
+    been safety-discarded - even though ``m15_last_closed_close`` here is a
+    real, present, non-None Decimal (standing in for genuinely retained
+    Stage 3A history), ``fetch_failures`` being non-empty must still force
+    ``binance_reference_price=None`` alongside ``technical``/
+    ``m15_market_structure``. This prevents a hidden stale-reference-price
+    seam."""
+    from decimal import Decimal
+
+    from app.core.enums.market import Timeframe
+    from app.technical.production import TechnicalFetchFailure
+    from tests.production_advisory_support import FakeTechnicalComposer
+
+    calls = _fake_run_runtime_cycle(monkeypatch)
+    failure = TechnicalFetchFailure(timeframe=Timeframe.M15, error_type="ProviderUnavailableError")
+    technical_composer = FakeTechnicalComposer(fetch_failures=(failure,), m15_last_closed_close=Decimal("12345.6"))
+    composer = _make_composer(technical_composer=technical_composer)
+    await composer.startup()
+    await composer.run_cycle(as_of=AS_OF, trade_ids=all_trade_ids())
+
+    assert calls[0]["binance_reference_price"] is None
+    assert calls[0]["technical"] is None
+    assert calls[0]["m15_market_structure"] is None
+
+
+# --- symbol_mapping / mt5_symbol routing to run_runtime_cycle ---------------
+
+
+@pytest.mark.asyncio
+async def test_mt5_symbol_and_binance_symbol_route_independently(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Corrective design closure ("PROVIDER SYMBOL SPLIT + PRICE-BASIS
+    RECONCILIATION"): run_runtime_cycle receives the MT5 broker symbol as
+    its own explicit ``mt5_symbol`` argument, distinct from the Binance
+    symbol embedded in ``context`` (Flow/Technical/Market Evaluation's own
+    analytical identity) - never the same field doing double duty."""
+    from app.production_advisory.config import SymbolMapping
+    from tests.production_advisory_support import build_config
+
+    calls = _fake_run_runtime_cycle(monkeypatch)
+    mapping = SymbolMapping(logical_symbol="BTC", binance_symbol="BTCUSDT", mt5_symbol="BTCUSDt")
+    composer = _make_composer(config=build_config(symbol_mapping=mapping))
+    await composer.startup()
+    await composer.run_cycle(as_of=AS_OF, trade_ids=all_trade_ids())
+
+    assert calls[0]["mt5_symbol"] == "BTCUSDt"
+    assert calls[0]["context"].symbol == "BTCUSDT"
+
+
+@pytest.mark.asyncio
+async def test_max_price_basis_divergence_percent_passed_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    from decimal import Decimal
+
+    from tests.production_advisory_support import build_config
+
+    calls = _fake_run_runtime_cycle(monkeypatch)
+    composer = _make_composer(config=build_config(max_price_basis_divergence_percent=Decimal("7.5")))
+    await composer.startup()
+    await composer.run_cycle(as_of=AS_OF, trade_ids=all_trade_ids())
+
+    assert calls[0]["max_price_basis_divergence_percent"] == Decimal("7.5")
+
+
+def test_default_flow_bootstrap_uses_binance_symbol_never_mt5_symbol() -> None:
+    """Pure object-graph construction only - no network, no real connection.
+    ``_default_flow_bootstrap`` must build its FlowRealtimeBootstrapConfig
+    from symbol_mapping.binance_symbol, never symbol_mapping.mt5_symbol."""
+    from app.market_data.providers.binance.client import BinanceRestClient
+    from app.production_advisory.config import SymbolMapping
+    from tests.production_advisory_support import build_config
+
+    mapping = SymbolMapping(logical_symbol="BTC", binance_symbol="BTCUSDT", mt5_symbol="BTCUSDt")
+    config = build_config(symbol_mapping=mapping)
+    rest_client = BinanceRestClient()
+    try:
+        bootstrap = composer_module._default_flow_bootstrap(config, rest_client)
+        assert bootstrap._config.symbol == "BTCUSDT"
+        assert bootstrap._config.symbol != "BTCUSDt"
+    finally:
+        rest_client.close()
+
+
+def test_default_technical_composer_uses_binance_symbol_never_mt5_symbol() -> None:
+    from app.market_data.providers.binance.client import BinanceRestClient
+    from app.production_advisory.config import SymbolMapping
+    from tests.production_advisory_support import build_config
+
+    mapping = SymbolMapping(logical_symbol="BTC", binance_symbol="BTCUSDT", mt5_symbol="BTCUSDt")
+    config = build_config(symbol_mapping=mapping)
+    rest_client = BinanceRestClient()
+    try:
+        technical_composer = composer_module._default_technical_composer(config, rest_client)
+        assert technical_composer._config.symbol == "BTCUSDT"
+        assert technical_composer._config.symbol != "BTCUSDt"
+    finally:
+        rest_client.close()
+
+
 # --- Flow health vs. trading evidence ---------------------------------------
 
 

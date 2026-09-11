@@ -164,6 +164,12 @@ class RecommendationDTO(DomainModel):
     output/``no_trade_explanation``/``warnings``). ``Decimal``/``Timestamp``
     values are preserved unchanged; ``account_currency`` is copied verbatim,
     never hardcoded, never converted.
+
+    ``symbol`` (corrective design closure, "PROVIDER SYMBOL SPLIT + PRICE-
+    BASIS RECONCILIATION") is the MT5 broker-facing symbol (``SymbolMapping.
+    mt5_symbol``, e.g. ``"BTCUSDt"``) - what the operator actually types into
+    their broker for manual execution. Never the Binance/logical spelling -
+    see ``AdvisoryResponse.symbol``/``.market_data_symbol`` for those.
     """
 
     trade_id: Annotated[str, Field(min_length=1)]
@@ -294,17 +300,26 @@ class AdvisoryResponse(DomainModel):
     """The one stable, transport-neutral application DTO
     ``ApplicationAdvisoryService.create_advisory`` returns.
 
-    ``symbol`` always mirrors ``ProductionAdvisoryConfig``'s own fixed,
-    operator-configured V1 symbol - there is no caller-supplied symbol
-    parameter anywhere in this package. ``recommendations`` and
-    ``no_trade_reasons`` are independent facts from ``status`` (see
-    ``ApplicationAdvisoryStatus``'s own docstring): a ``DEGRADED`` response
-    may still carry one or more ``recommendations``.
+    ``symbol`` (corrective design closure, "PROVIDER SYMBOL SPLIT + PRICE-
+    BASIS RECONCILIATION") is the operator-facing logical instrument
+    identifier (``SymbolMapping.logical_symbol``, e.g. ``"BTC"``) - fed to no
+    provider, never the Binance or MT5 native spelling. ``market_data_symbol``
+    is the Binance symbol (``SymbolMapping.binance_symbol``, e.g.
+    ``"BTCUSDT"``) the analytical evidence actually came from - present even
+    when ``recommendations`` is empty. The MT5 broker-facing symbol (e.g.
+    ``"BTCUSDt"``) is never duplicated here: it lives on each
+    ``RecommendationDTO.symbol`` instead, since a cycle may legitimately
+    carry zero recommendations. There is no caller-supplied symbol parameter
+    anywhere in this package. ``recommendations`` and ``no_trade_reasons``
+    are independent facts from ``status`` (see ``ApplicationAdvisoryStatus``'s
+    own docstring): a ``DEGRADED`` response may still carry one or more
+    ``recommendations``.
     """
 
     logical_cycle_id: str
     as_of: Timestamp
     symbol: Symbol
+    market_data_symbol: Symbol
     status: ApplicationAdvisoryStatus
     recommendations: tuple[RecommendationDTO, ...]
     no_trade_reasons: tuple[NoTradeReasonDTO, ...]

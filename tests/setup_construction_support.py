@@ -19,6 +19,7 @@ from app.core.enums.quality import FeatureQuality
 from app.core.enums.strategy_judge import JudgeOutcome
 from app.core.enums.strategy_router import StrategyFamily
 from app.core.enums.technical import BreakDirection, SwingKind
+from app.core.enums.trade import TradeDirection
 from app.core.models.feature_status import FeatureStatus
 from app.core.models.market_structure_features import MarketStructureFeatures, StructuralBreak, SwingPoint
 from app.core.models.mt5_symbol import MT5SymbolFacts
@@ -33,11 +34,13 @@ from tests.market_evaluation_support import SYMBOL, full_flow_result
 
 __all__ = [
     "AS_OF",
+    "MAX_PRICE_BASIS_DIVERGENCE_PERCENT",
     "SYMBOL",
     "breakout_policy_result",
     "combined_trend_following_and_breakout_policy_result",
     "event_driven_policy_result",
     "mean_reversion_synthetic_policy_result",
+    "reference_price_for",
     "result_for",
     "structural_break",
     "swing",
@@ -53,6 +56,23 @@ AS_OF = EVALUATION_NOW
 every constructed setup shares one coherent cycle timestamp."""
 
 _STRUCTURE_TIME = datetime(2026, 1, 1, 6, 0, 0, tzinfo=UTC)
+
+MAX_PRICE_BASIS_DIVERGENCE_PERCENT = Decimal("100")
+"""Generous test-only threshold - deliberately never triggers unless a test
+constructs a deliberately diverging entry/reference pair (see
+``tests/test_setup_construction_price_basis.py``)."""
+
+
+def reference_price_for(direction: TradeDirection, facts: MT5SymbolFacts) -> Decimal:
+    """The Binance reference price that makes distance-translation a no-op
+    for a given ``MT5SymbolFacts`` fixture - i.e. exactly what
+    ``_resolve_entry_price`` itself would select. Existing structural-stop
+    fixtures already express their expected ``stop_loss`` as a literal
+    Binance price level; supplying this as ``binance_reference_price`` keeps
+    every non-price-basis-focused test's literal assertions valid unchanged
+    (translation reduces to the identity transform when reference == entry).
+    """
+    return facts.ask if direction is TradeDirection.LONG else facts.bid
 
 
 def result_for(strategy_setup_result: StrategySetupResult, family: StrategyFamily) -> SetupConstructionResult | None:

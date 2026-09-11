@@ -13,14 +13,37 @@ from app.core.models.risk_gate_result import CandidateRiskInput
 from app.decision.setup_construction import SetupConstruction, to_candidate_risk_inputs
 from app.risk.engine import RiskGate
 from tests.risk_gate_support import default_account_snapshot, default_config
-from tests.setup_construction_support import AS_OF, result_for, swing, symbol_facts, trend_following_policy_result, usable_market_structure
+from tests.setup_construction_support import (
+    AS_OF,
+    MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
+    SYMBOL,
+    result_for,
+    swing,
+    symbol_facts,
+    trend_following_policy_result,
+    usable_market_structure,
+)
+
+_REFERENCE_PRICE = Decimal("100")
+"""Arbitrary valid placeholder for the two BLOCKED-setup tests below, which
+supply symbol_facts=None - Setup Construction blocks on _symbol_facts_usable
+before binance_reference_price is ever consulted, so its exact value is
+immaterial there."""
 
 
 def test_constructed_setup_bridges_exact_risk_per_unit() -> None:
     policy = trend_following_policy_result(direction="UPWARD")
     ms = usable_market_structure(swings=(swing(kind=SwingKind.LOW, price=Decimal("95")),))
     facts = symbol_facts(ask=Decimal("110"), bid=Decimal("109.5"))
-    setup_result = SetupConstruction().construct(strategy_policy_result=policy, as_of=AS_OF, symbol_facts=facts, m15_market_structure=ms)
+    setup_result = SetupConstruction().construct(
+        strategy_policy_result=policy,
+        as_of=AS_OF,
+        symbol_facts=facts,
+        m15_market_structure=ms,
+        broker_symbol=SYMBOL,
+        binance_reference_price=facts.ask,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
+    )
     setup = result_for(setup_result, StrategyFamily.TREND_FOLLOWING)
 
     candidates = to_candidate_risk_inputs(setup_result)
@@ -32,7 +55,13 @@ def test_blocked_setup_bridges_zero_sentinel() -> None:
     policy = trend_following_policy_result(direction="UPWARD")
     # No usable structure at all -> BLOCKED / SHARED_FACT_UNAVAILABLE.
     setup_result = SetupConstruction().construct(
-        strategy_policy_result=policy, as_of=AS_OF, symbol_facts=symbol_facts(), m15_market_structure=None
+        strategy_policy_result=policy,
+        as_of=AS_OF,
+        symbol_facts=symbol_facts(),
+        m15_market_structure=None,
+        broker_symbol=SYMBOL,
+        binance_reference_price=_REFERENCE_PRICE,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
     setup = result_for(setup_result, StrategyFamily.TREND_FOLLOWING)
     assert setup.reasons == (SetupBlockReason.SHARED_FACT_UNAVAILABLE,)
@@ -45,7 +74,13 @@ def test_blocked_setup_bridges_zero_sentinel() -> None:
 def test_exactly_one_candidate_risk_input_per_policy_eligible_family() -> None:
     policy = trend_following_policy_result(direction="UPWARD")
     setup_result = SetupConstruction().construct(
-        strategy_policy_result=policy, as_of=AS_OF, symbol_facts=None, m15_market_structure=None
+        strategy_policy_result=policy,
+        as_of=AS_OF,
+        symbol_facts=None,
+        m15_market_structure=None,
+        broker_symbol=SYMBOL,
+        binance_reference_price=_REFERENCE_PRICE,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
 
     candidates = to_candidate_risk_inputs(setup_result)
@@ -60,7 +95,15 @@ def test_risk_gate_accepts_bridge_output_without_modification() -> None:
     policy = trend_following_policy_result(direction="UPWARD")
     ms = usable_market_structure(swings=(swing(kind=SwingKind.LOW, price=Decimal("95")),))
     facts = symbol_facts(ask=Decimal("110"), bid=Decimal("109.5"))
-    setup_result = SetupConstruction().construct(strategy_policy_result=policy, as_of=AS_OF, symbol_facts=facts, m15_market_structure=ms)
+    setup_result = SetupConstruction().construct(
+        strategy_policy_result=policy,
+        as_of=AS_OF,
+        symbol_facts=facts,
+        m15_market_structure=ms,
+        broker_symbol=SYMBOL,
+        binance_reference_price=facts.ask,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
+    )
 
     candidates = to_candidate_risk_inputs(setup_result)
     risk_result = RiskGate().evaluate(
@@ -77,7 +120,13 @@ def test_risk_gate_accepts_bridge_output_without_modification() -> None:
 def test_blocked_setup_reaches_existing_zero_or_negative_risk_per_unit_behavior() -> None:
     policy = trend_following_policy_result(direction="UPWARD")
     setup_result = SetupConstruction().construct(
-        strategy_policy_result=policy, as_of=AS_OF, symbol_facts=None, m15_market_structure=None
+        strategy_policy_result=policy,
+        as_of=AS_OF,
+        symbol_facts=None,
+        m15_market_structure=None,
+        broker_symbol=SYMBOL,
+        binance_reference_price=_REFERENCE_PRICE,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
     setup = result_for(setup_result, StrategyFamily.TREND_FOLLOWING)
     assert setup.reasons == (SetupBlockReason.SHARED_FACT_UNAVAILABLE,)  # the true reason, retained on StrategySetupResult

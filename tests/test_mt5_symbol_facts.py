@@ -41,6 +41,7 @@ def test_symbol_facts_extra_forbidden() -> None:
             symbol="EURUSD",
             trade_tick_size=Decimal("0.00001"),
             trade_tick_value_loss=Decimal("1"),
+            point=Decimal("0.00001"),
             volume_min=Decimal("0.01"),
             volume_max=Decimal("100"),
             volume_step=Decimal("0.01"),
@@ -48,13 +49,18 @@ def test_symbol_facts_extra_forbidden() -> None:
             trade_mode=MT5SymbolTradeMode.FULL,
             bid=Decimal("1"),
             ask=Decimal("1"),
-            point=Decimal("0.00001"),
+            digits=5,  # genuinely unknown/excluded field - "point" is itself a real field now
         )
 
 
 def test_symbol_facts_has_no_speculative_fields() -> None:
-    for field in ("point", "digits", "trade_tick_value_profit", "contract_size", "currency", "trade_freeze_level"):
+    """``point`` is deliberately NOT in this exclusion list (corrective
+    review, "MT5 BROKER STOP-LEVEL SEMANTICS") - it is a real, required
+    field, distinct from ``trade_tick_size``, needed for broker minimum-
+    stop-distance validation."""
+    for field in ("digits", "trade_tick_value_profit", "contract_size", "currency", "trade_freeze_level"):
         assert field not in MT5SymbolFacts.model_fields
+    assert "point" in MT5SymbolFacts.model_fields
 
 
 # --- MT5Client.symbol_facts() ---
@@ -77,7 +83,13 @@ def test_symbol_facts_missing_tick_returns_none() -> None:
 def test_symbol_facts_normalizes_all_fields() -> None:
     raw = FakeRawMT5Module(
         symbol_info_result=default_raw_symbol_info(
-            trade_tick_size=0.00001, trade_tick_value_loss=1.25, volume_min=0.01, volume_max=50.0, volume_step=0.01, trade_stops_level=10
+            trade_tick_size=0.00001,
+            trade_tick_value_loss=1.25,
+            point=0.00001,
+            volume_min=0.01,
+            volume_max=50.0,
+            volume_step=0.01,
+            trade_stops_level=10,
         ),
         symbol_tick_result=default_raw_tick(bid=1.2345, ask=1.2347),
     )
@@ -87,6 +99,7 @@ def test_symbol_facts_normalizes_all_fields() -> None:
     assert facts is not None
     assert facts.trade_tick_size == Decimal("0.00001")
     assert facts.trade_tick_value_loss == Decimal("1.25")
+    assert facts.point == Decimal("0.00001")
     assert facts.volume_min == Decimal("0.01")
     assert facts.volume_max == Decimal("50.0")
     assert facts.volume_step == Decimal("0.01")
@@ -94,6 +107,25 @@ def test_symbol_facts_normalizes_all_fields() -> None:
     assert facts.bid == Decimal("1.2345")
     assert facts.ask == Decimal("1.2347")
     assert isinstance(facts, MT5SymbolFacts)
+
+
+def test_symbol_facts_maps_point_verbatim_and_distinct_from_tick_size() -> None:
+    """MT5 client mapping test (corrective review, "MT5 BROKER STOP-LEVEL
+    SEMANTICS"): MetaTrader5 symbol_info.point -> MT5SymbolFacts.point,
+    verbatim Decimal conversion, using a fixture where point and
+    trade_tick_size deliberately differ - proving the client never derives
+    one from the other. No live MT5 call."""
+    raw = FakeRawMT5Module(
+        symbol_info_result=default_raw_symbol_info(trade_tick_size=0.10, point=0.01),
+        symbol_tick_result=default_raw_tick(),
+    )
+    client = MT5Client(mt5_module=raw)
+    client.initialize()
+    facts = client.symbol_facts("EURUSD")
+    assert facts is not None
+    assert facts.point == Decimal("0.01")
+    assert facts.trade_tick_size == Decimal("0.10")
+    assert facts.point != facts.trade_tick_size
 
 
 @pytest.mark.parametrize(

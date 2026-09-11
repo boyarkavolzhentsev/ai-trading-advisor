@@ -65,6 +65,16 @@ def test_multiple_opposite_direction_actionable_families_coexist() -> None:
         technical=opposite_direction_technical(),
         flow=full_flow_result(),
         m15_market_structure=opposite_direction_market_structure(),
+        # opposite_direction_market_structure's own LONG stop (100) and SHORT
+        # stop (100.10) require a single shared Binance reference price
+        # strictly between them for BOTH directions' distance to translate
+        # positively (mirrors the one-shared-reference-per-cycle production
+        # reality - there is no per-direction reference in practice either).
+        binance_reference_price=Decimal("100.05"),
+        # narrower bid/ask spread (0.02 vs the default 0.10) so the real,
+        # bid/ask-based broker-minimum-stop check can pass for BOTH
+        # directions simultaneously (see run_pipeline's own docstring).
+        symbol_facts_override=symbol_facts(bid=Decimal("100.08")),
     )
     result = construct_final_recommendations(
         decision_risk_pipeline_result=pipeline_result,
@@ -160,6 +170,16 @@ def test_family_join_is_by_strategy_family_not_tuple_position() -> None:
         technical=opposite_direction_technical(),
         flow=full_flow_result(),
         m15_market_structure=opposite_direction_market_structure(),
+        # opposite_direction_market_structure's own LONG stop (100) and SHORT
+        # stop (100.10) require a single shared Binance reference price
+        # strictly between them for BOTH directions' distance to translate
+        # positively (mirrors the one-shared-reference-per-cycle production
+        # reality - there is no per-direction reference in practice either).
+        binance_reference_price=Decimal("100.05"),
+        # narrower bid/ask spread (0.02 vs the default 0.10) so the real,
+        # bid/ask-based broker-minimum-stop check can pass for BOTH
+        # directions simultaneously (see run_pipeline's own docstring).
+        symbol_facts_override=symbol_facts(bid=Decimal("100.08")),
     )
     reordered_setup_result = pipeline_result.strategy_setup_result.model_copy(
         update={"family_results": tuple(reversed(pipeline_result.strategy_setup_result.family_results))}

@@ -438,6 +438,7 @@ def map_advisory_response(logical_cycle_id: str, cycle: ProductionAdvisoryCycleR
         logical_cycle_id=logical_cycle_id,
         as_of=cycle.as_of,
         symbol=cycle.symbol,
+        market_data_symbol=cycle.market_data_symbol,
         status=status,
         recommendations=recommendations,
         no_trade_reasons=no_trade_reasons,

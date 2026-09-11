@@ -51,6 +51,12 @@ def _opposite_direction_final_recommendation_result():
         technical=opposite_direction_technical(),
         flow=full_flow_result(),
         m15_market_structure=opposite_direction_market_structure(),
+        # a single shared Binance reference strictly between the LONG stop
+        # (100) and the SHORT stop (100.10) - both directions' distance
+        # translates positively (mirrors the one-shared-reference-per-cycle
+        # production reality).
+        binance_reference_price=Decimal("100.05"),
+        symbol_facts_override=symbol_facts(bid=Decimal("100.08")),
     )
     return construct_final_recommendations(
         decision_risk_pipeline_result=pipeline_result,

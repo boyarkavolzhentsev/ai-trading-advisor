@@ -70,6 +70,9 @@ def _run_cycle(tmp_path: Path, client: RuntimeCycleFakeClient, stores=None, **ov
         market=MarketType.CRYPTO,
         trade_ids={StrategyFamily.TREND_FOLLOWING: "trade-1"},
         context=context(),
+        mt5_symbol=TARGET_SYMBOL,
+        binance_reference_price=Decimal("100.10"),
+        max_price_basis_divergence_percent=Decimal("100"),
         technical=trend_following_technical(),
         m15_market_structure=actionable_trend_market_structure(),
     )
@@ -142,7 +145,14 @@ def test_full_happy_path_netting_allowed_when_flat_and_uncontested(tmp_path: Pat
 
 
 def test_multiple_actionable_netting_blocks_all(tmp_path: Path) -> None:
-    client = _actionable_client(account_facts=default_account_facts(margin_mode=AccountPositionMode.NETTING))
+    # narrower bid/ask spread (0.02 vs the default 0.10) so the real,
+    # bid/ask-based broker-minimum-stop check can pass for BOTH directions
+    # simultaneously from one shared Binance reference (see
+    # tests/final_recommendation_support.py::run_pipeline's own docstring).
+    client = _actionable_client(
+        account_facts=default_account_facts(margin_mode=AccountPositionMode.NETTING),
+        symbol_facts_by_symbol={TARGET_SYMBOL: symbol_facts(bid=Decimal("100.08"))},
+    )
     result, *_ = _run_cycle(
         tmp_path,
         client,
@@ -150,6 +160,11 @@ def test_multiple_actionable_netting_blocks_all(tmp_path: Path) -> None:
         m15_market_structure=opposite_direction_market_structure(),
         flow=full_flow_result(),
         trade_ids={StrategyFamily.TREND_FOLLOWING: "trade-long", StrategyFamily.BREAKOUT: "trade-short"},
+        # a single shared Binance reference strictly between the LONG stop
+        # (100) and the SHORT stop (100.10) - both directions translate
+        # positively (mirrors the one-shared-reference-per-cycle production
+        # reality).
+        binance_reference_price=Decimal("100.05"),
     )
 
     assert result.final_recommendation_construction_result is not None
@@ -499,3 +514,62 @@ def test_explicit_trade_id_preserved_no_generation(tmp_path: Path) -> None:
     client = _actionable_client()
     result, *_ = _run_cycle(tmp_path, client, trade_ids={StrategyFamily.TREND_FOLLOWING: "operator-supplied-77"})
     assert result.new_tracking_results[0].trade_id == "operator-supplied-77"
+
+
+# --- provider-specific symbol routing (corrective design closure,
+# "PROVIDER SYMBOL SPLIT + PRICE-BASIS RECONCILIATION") --------------------
+
+
+def test_mt5_symbol_and_binance_context_symbol_route_to_distinct_facts(tmp_path: Path) -> None:
+    """End-to-end proof, with genuinely distinct strings (never the same
+    string doing double duty): MT5 symbol_facts/netting-guard/tracking all
+    use the MT5 broker symbol (BTCUSDt); the Binance analytical identity
+    embedded in context (BTCUSDT) is never used for any of those, and never
+    reaches MT5Client.symbol_facts()."""
+    mt5_symbol = "BTCUSDt"
+    binance_symbol = "BTCUSDT"
+    client = _actionable_client(symbol_facts_by_symbol={mt5_symbol: symbol_facts(symbol=mt5_symbol)})
+
+    result, _, tracking_persistence, _ = _run_cycle(
+        tmp_path,
+        client,
+        context=context(symbol=binance_symbol),
+        mt5_symbol=mt5_symbol,
+    )
+
+    # MT5 symbol_facts() was called with the MT5 symbol only:
+    assert client.symbol_facts_calls == [mt5_symbol]
+    assert binance_symbol not in client.symbol_facts_calls
+
+    # target-symbol-facts resolution succeeded against the MT5 symbol:
+    assert result.target_symbol_facts_available is True
+
+    # the issued recommendation/tracked position carry the MT5 symbol, never the Binance one:
+    assert len(result.new_tracking_results) == 1
+    tracked = result.new_tracking_results[0].tracking_creation_result.tracked_recommendation
+    assert tracked.position_record.symbol == mt5_symbol
+    assert tracked.position_record.symbol != binance_symbol
+
+    _, persisted = tracking_persistence.read("trade-1")
+    assert persisted.position_record.symbol == mt5_symbol
+
+
+def test_netting_guard_compares_mt5_symbol_against_mt5_position_symbol(tmp_path: Path) -> None:
+    """The netting guard's broker-position check must compare the MT5
+    symbol against real MT5Position.symbol values - never the Binance
+    analytical symbol, which a real broker position can never report."""
+    mt5_symbol = "BTCUSDt"
+    binance_symbol = "BTCUSDT"
+    existing_position = MT5Position(
+        as_of=NOW, ticket=555, symbol=mt5_symbol, side=OrderSide.BUY, volume=Decimal("1"), price_open=Decimal("100"), price_current=Decimal("100")
+    )
+    client = _actionable_client(
+        account_facts=default_account_facts(margin_mode=AccountPositionMode.NETTING),
+        positions_result=("OK", (existing_position,)),
+        symbol_facts_by_symbol={mt5_symbol: symbol_facts(symbol=mt5_symbol)},
+    )
+
+    result, *_ = _run_cycle(tmp_path, client, context=context(symbol=binance_symbol), mt5_symbol=mt5_symbol)
+
+    assert result.netting_guard_result.outcome is NettingIssuanceOutcome.BLOCKED_EXISTING_BROKER_POSITION
+    assert result.netting_guard_result.symbol == mt5_symbol

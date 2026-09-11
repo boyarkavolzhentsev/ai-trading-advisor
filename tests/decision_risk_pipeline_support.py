@@ -27,10 +27,14 @@ from tests.runtime_fact_assembly_support import (
     usable_open_risk,
     usable_realized_pnl,
 )
+from tests.setup_construction_support import SYMBOL as _SYMBOL
 from tests.setup_construction_support import structural_break, swing, symbol_facts as _symbol_facts, usable_market_structure
 from tests.strategy_judge_support import technical_with_market_structure_break, technical_with_trend_observations
 
 __all__ = [
+    "BROKER_SYMBOL",
+    "BINANCE_REFERENCE_PRICE",
+    "MAX_PRICE_BASIS_DIVERGENCE_PERCENT",
     "NOW",
     "blocked_assembly",
     "combined_trend_and_breakout_technical",
@@ -41,6 +45,14 @@ __all__ = [
     "trend_following_market_structure",
     "trend_following_technical",
 ]
+
+BROKER_SYMBOL = _SYMBOL
+BINANCE_REFERENCE_PRICE = Decimal("100.10")
+"""Equal to symbol_facts()'s own default ask (see tests.setup_construction_
+support.symbol_facts) - every test in this module is a LONG (UPWARD)
+scenario, so this reference price makes distance-translation a no-op,
+preserving every existing literal stop/risk assertion unchanged."""
+MAX_PRICE_BASIS_DIVERGENCE_PERCENT = Decimal("100")
 
 
 def context(**overrides: object) -> MarketEvaluationContext:

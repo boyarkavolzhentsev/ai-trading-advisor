@@ -13,6 +13,8 @@ from app.core.config.constants import SIGNAL_EXECUTION_WINDOW
 from app.decision.setup_construction import SetupConstruction
 from tests.setup_construction_support import (
     AS_OF,
+    MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
+    SYMBOL,
     combined_trend_following_and_breakout_policy_result,
     result_for,
     structural_break,
@@ -27,8 +29,15 @@ def _trend_setup(*, direction: str, ask: Decimal, bid: Decimal, stop: Decimal, k
     policy = trend_following_policy_result(direction=direction)
     ms = usable_market_structure(swings=(swing(kind=kind, price=stop),))
     facts = symbol_facts(ask=ask, bid=bid)
+    reference_price = ask if direction == "UPWARD" else bid
     setup_result = SetupConstruction().construct(
-        strategy_policy_result=policy, as_of=AS_OF, symbol_facts=facts, m15_market_structure=ms
+        strategy_policy_result=policy,
+        as_of=AS_OF,
+        symbol_facts=facts,
+        m15_market_structure=ms,
+        broker_symbol=SYMBOL,
+        binance_reference_price=reference_price,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
     return result_for(setup_result, StrategyFamily.TREND_FOLLOWING)
 
@@ -64,7 +73,13 @@ def test_risk_per_unit_exact_decimal_formula() -> None:
     facts = symbol_facts(ask=entry, bid=entry - Decimal("0.5"), trade_tick_size=tick_size, trade_tick_value_loss=tick_value_loss)
 
     setup_result = SetupConstruction().construct(
-        strategy_policy_result=policy, as_of=AS_OF, symbol_facts=facts, m15_market_structure=ms
+        strategy_policy_result=policy,
+        as_of=AS_OF,
+        symbol_facts=facts,
+        m15_market_structure=ms,
+        broker_symbol=SYMBOL,
+        binance_reference_price=entry,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
     result = result_for(setup_result, StrategyFamily.TREND_FOLLOWING)
 
@@ -82,7 +97,13 @@ def test_risk_per_unit_uses_full_decimal_precision_no_quantization() -> None:
     facts = symbol_facts(ask=entry, bid=entry, trade_tick_size=tick_size, trade_tick_value_loss=tick_value_loss)
 
     setup_result = SetupConstruction().construct(
-        strategy_policy_result=policy, as_of=AS_OF, symbol_facts=facts, m15_market_structure=ms
+        strategy_policy_result=policy,
+        as_of=AS_OF,
+        symbol_facts=facts,
+        m15_market_structure=ms,
+        broker_symbol=SYMBOL,
+        binance_reference_price=entry,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
     result = result_for(setup_result, StrategyFamily.TREND_FOLLOWING)
 
@@ -93,8 +114,15 @@ def test_risk_per_unit_uses_full_decimal_precision_no_quantization() -> None:
 def test_signal_time_equals_caller_supplied_as_of() -> None:
     policy = trend_following_policy_result(direction="UPWARD")
     ms = usable_market_structure(swings=(swing(kind=SwingKind.LOW, price=Decimal("95")),))
+    facts = symbol_facts()
     setup_result = SetupConstruction().construct(
-        strategy_policy_result=policy, as_of=AS_OF, symbol_facts=symbol_facts(), m15_market_structure=ms
+        strategy_policy_result=policy,
+        as_of=AS_OF,
+        symbol_facts=facts,
+        m15_market_structure=ms,
+        broker_symbol=SYMBOL,
+        binance_reference_price=facts.ask,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
     result = result_for(setup_result, StrategyFamily.TREND_FOLLOWING)
     assert result.setup.signal_time == AS_OF
@@ -103,8 +131,15 @@ def test_signal_time_equals_caller_supplied_as_of() -> None:
 def test_valid_until_equals_as_of_plus_signal_execution_window() -> None:
     policy = trend_following_policy_result(direction="UPWARD")
     ms = usable_market_structure(swings=(swing(kind=SwingKind.LOW, price=Decimal("95")),))
+    facts = symbol_facts()
     setup_result = SetupConstruction().construct(
-        strategy_policy_result=policy, as_of=AS_OF, symbol_facts=symbol_facts(), m15_market_structure=ms
+        strategy_policy_result=policy,
+        as_of=AS_OF,
+        symbol_facts=facts,
+        m15_market_structure=ms,
+        broker_symbol=SYMBOL,
+        binance_reference_price=facts.ask,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
     result = result_for(setup_result, StrategyFamily.TREND_FOLLOWING)
     assert result.setup.valid_until == AS_OF + SIGNAL_EXECUTION_WINDOW
@@ -120,7 +155,13 @@ def test_multi_family_results_are_independent_and_preserve_policy_order() -> Non
     facts = symbol_facts(ask=Decimal("110"), bid=Decimal("109.5"))
 
     setup_result = SetupConstruction().construct(
-        strategy_policy_result=policy, as_of=AS_OF, symbol_facts=facts, m15_market_structure=ms
+        strategy_policy_result=policy,
+        as_of=AS_OF,
+        symbol_facts=facts,
+        m15_market_structure=ms,
+        broker_symbol=SYMBOL,
+        binance_reference_price=facts.ask,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
 
     expected_families = tuple(
@@ -146,7 +187,13 @@ def test_one_family_blocked_does_not_block_the_other_when_shared_facts_are_valid
     facts = symbol_facts(ask=Decimal("110"), bid=Decimal("109.5"))
 
     setup_result = SetupConstruction().construct(
-        strategy_policy_result=policy, as_of=AS_OF, symbol_facts=facts, m15_market_structure=ms
+        strategy_policy_result=policy,
+        as_of=AS_OF,
+        symbol_facts=facts,
+        m15_market_structure=ms,
+        broker_symbol=SYMBOL,
+        binance_reference_price=facts.ask,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
 
     tf_result = result_for(setup_result, StrategyFamily.TREND_FOLLOWING)

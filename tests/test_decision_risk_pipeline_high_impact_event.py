@@ -23,7 +23,17 @@ from app.core.enums.strategy_router import StrategyFamily
 from app.core.models.high_impact_event import HighImpactEventContext, HighImpactEventRecord
 from app.orchestration.decision_risk_pipeline import evaluate_decision_risk_pipeline
 from app.orchestration.final_recommendation import construct_final_recommendations
-from tests.decision_risk_pipeline_support import NOW, context, ready_assembly, symbol_facts, trend_following_market_structure, trend_following_technical
+from tests.decision_risk_pipeline_support import (
+    BINANCE_REFERENCE_PRICE,
+    BROKER_SYMBOL,
+    MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
+    NOW,
+    context,
+    ready_assembly,
+    symbol_facts,
+    trend_following_market_structure,
+    trend_following_technical,
+)
 from tests.final_recommendation_support import actionable_trend_market_structure
 from tests.risk_gate_support import default_config
 
@@ -63,6 +73,9 @@ def _run(*, high_impact_event_context=None, ctx=None):
         evaluation_time=NOW,
         symbol_facts=symbol_facts(),
         m15_market_structure=trend_following_market_structure(),
+        broker_symbol=BROKER_SYMBOL,
+        binance_reference_price=BINANCE_REFERENCE_PRICE,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=ready_assembly(),
         trading_cycle_config=default_config(),
         high_impact_event_context=high_impact_event_context,
@@ -90,6 +103,9 @@ def test_high_impact_event_risk_result_retained_even_when_blocked_before_risk() 
         evaluation_time=NOW,
         symbol_facts=symbol_facts(),
         m15_market_structure=trend_following_market_structure(),
+        broker_symbol=BROKER_SYMBOL,
+        binance_reference_price=BINANCE_REFERENCE_PRICE,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=blocked_assembly(),
         trading_cycle_config=default_config(),
         high_impact_event_context=_blocking_event_context(),
@@ -167,6 +183,9 @@ def test_final_recommendation_is_actionable_without_event_block_same_inputs_othe
         evaluation_time=NOW,
         symbol_facts=symbol_facts(),
         m15_market_structure=actionable_trend_market_structure(),
+        broker_symbol=BROKER_SYMBOL,
+        binance_reference_price=BINANCE_REFERENCE_PRICE,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=ready_assembly(),
         trading_cycle_config=default_config(),
         high_impact_event_context=None,
@@ -194,6 +213,9 @@ def test_no_high_impact_event_context_matches_pre_existing_behavior_exactly() ->
         evaluation_time=NOW,
         symbol_facts=symbol_facts(),
         m15_market_structure=trend_following_market_structure(),
+        broker_symbol=BROKER_SYMBOL,
+        binance_reference_price=BINANCE_REFERENCE_PRICE,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=ready_assembly(),
         trading_cycle_config=default_config(),
     )

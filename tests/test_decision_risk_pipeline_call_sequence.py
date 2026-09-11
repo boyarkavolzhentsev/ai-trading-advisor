@@ -16,6 +16,9 @@ import app.orchestration.decision_risk_pipeline as pipeline_module
 from app.core.enums.decision_risk_pipeline import DecisionRiskPipelineOutcome
 from app.orchestration.decision_risk_pipeline import evaluate_decision_risk_pipeline
 from tests.decision_risk_pipeline_support import (
+    BINANCE_REFERENCE_PRICE,
+    BROKER_SYMBOL,
+    MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     NOW,
     blocked_assembly,
     context,
@@ -109,6 +112,9 @@ def _run(*, account_risk_snapshot_assembly) -> object:
         evaluation_time=NOW,
         symbol_facts=symbol_facts(),
         m15_market_structure=trend_following_market_structure(),
+        broker_symbol=BROKER_SYMBOL,
+        binance_reference_price=BINANCE_REFERENCE_PRICE,
+        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=account_risk_snapshot_assembly,
         trading_cycle_config=default_config(),
     )
