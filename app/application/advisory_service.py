@@ -29,6 +29,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
+from app.application.cycle_receipt import CycleReceiptClaimResult, CycleReceiptPersistence
 from app.application.dto import (
     AdvisoryResponse,
     ApplicationAdvisoryStatus,
@@ -449,12 +450,23 @@ def map_advisory_response(logical_cycle_id: str, cycle: ProductionAdvisoryCycleR
 class ApplicationAdvisoryService:
     """Transport-neutral façade above ``ProductionAdvisoryComposer`` - the
     one shared process-level advisory entry point future FastAPI/Telegram
-    adapters will both call into. Adds no lifecycle state of its own:
-    ``ProductionAdvisoryComposer``'s own NEW/STARTED/STOPPED state machine
-    remains the single source of truth."""
+    adapters will both call into. Adds no composition-lifecycle state of its
+    own: ``ProductionAdvisoryComposer``'s own NEW/STARTED/STOPPED state
+    machine remains the single source of truth for that.
 
-    def __init__(self, *, composer: ProductionAdvisoryComposer) -> None:
+    Owns cycle-level request idempotency instead (the corrective "CYCLE-LEVEL
+    IDEMPOTENCY" design closure): ``logical_cycle_id`` denotes ONE logical
+    advisory attempt, and this is the one layer that knows about
+    ``logical_cycle_id`` at all - ``ProductionAdvisoryComposer.run_cycle``
+    only ever sees the derived ``trade_ids`` mapping. See
+    ``app.application.cycle_receipt`` for why a single atomic claim (never a
+    STARTED->COMPLETED transition, never a rewrite, never a response replay)
+    is the whole mechanism.
+    """
+
+    def __init__(self, *, composer: ProductionAdvisoryComposer, cycle_receipt_persistence: CycleReceiptPersistence) -> None:
         self._composer = composer
+        self._cycle_receipt_persistence = cycle_receipt_persistence
 
     async def startup(self) -> None:
         try:
@@ -466,13 +478,52 @@ class ApplicationAdvisoryService:
         await self._composer.shutdown()
 
     async def create_advisory(self, *, logical_cycle_id: str) -> AdvisoryResponse:
-        """Run exactly one fresh Stage0D cycle for ``logical_cycle_id``.
-        Never caches, never generates an identity, never retries
-        automatically on a duplicate. The sole V1 advisory-creation
-        method."""
+        """Run at most one fresh Stage0D cycle for ``logical_cycle_id``,
+        ever. Never caches, never generates an identity, never retries
+        automatically on a duplicate. The sole V1 advisory-creation method.
+
+        Cycle-level idempotency: ``logical_cycle_id`` is atomically claimed
+        (``CycleReceiptPersistence.claim``) before the composer is ever
+        called. A claim of ``ALREADY_EXISTS`` raises ``DuplicateCycleError``
+        immediately, with no composer call at all - regardless of whether a
+        prior attempt for this same id returned ``READY``/``NO_TRADE``/
+        ``DEGRADED``/``SERVICE_UNAVAILABLE``, raised, or crashed before
+        returning anything. ``colliding_trade_ids=()`` is used deliberately:
+        a receipt-level duplicate has no persisted trade_id collision to
+        report (that is the separate, still-active Stage0D/
+        ``ProductionAdvisoryComposer._reject_if_duplicate_cycle`` guard's own
+        concern - see that method's docstring) - no trade id is ever
+        fabricated merely to populate this field.
+
+        The claim uses the exact same ``as_of`` this method captures for the
+        cycle itself (never a second wall-clock read) - see
+        ``test_advisory_service_never_reads_wall_clock_outside_create_advisory``.
+
+        A claim failure *before* exclusive creation succeeds (e.g. the
+        receipt directory could not be created, or a permissions error -
+        see ``CycleReceiptPersistence.claim``'s own docstring) is a genuine,
+        unexpected persistence error, never a caller-input problem and never
+        a duplicate: it is mapped here to a sanitized ``InternalApplicationError``
+        (never ``str(exc)``, which could otherwise carry the receipt
+        directory's absolute filesystem path) - mirroring this same method's
+        own existing catch-all around ``composer.run_cycle`` below. A failure
+        writing/fsyncing the receipt body *after* exclusive creation already
+        succeeded is not an error at all from this method's perspective:
+        ``CycleReceiptPersistence.claim`` itself already swallows that case
+        and still returns ``CREATED`` - existence is the only fact that
+        matters (see its own docstring).
+        """
         validate_logical_cycle_id(logical_cycle_id)
         trade_ids = derive_trade_ids(logical_cycle_id)
         as_of = datetime.now(UTC)
+
+        try:
+            claim_result = self._cycle_receipt_persistence.claim(logical_cycle_id, accepted_at=as_of)
+        except Exception as exc:  # noqa: BLE001 - deliberate catch-all boundary, sanitized message only
+            raise InternalApplicationError("cycle receipt claim failed unexpectedly") from exc
+
+        if claim_result is CycleReceiptClaimResult.ALREADY_EXISTS:
+            raise DuplicateCycleError(logical_cycle_id=logical_cycle_id, colliding_trade_ids=())
 
         try:
             cycle = await self._composer.run_cycle(as_of=as_of, trade_ids=trade_ids)

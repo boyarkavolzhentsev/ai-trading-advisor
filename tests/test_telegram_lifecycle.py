@@ -161,6 +161,7 @@ async def test_post_shutdown_after_failed_startup_is_safe_with_real_composer() -
     raises")."""
     from app.application.advisory_service import ApplicationAdvisoryService
     from app.production_advisory.composer import ProductionAdvisoryComposer
+    from tests.application_support import FakeCycleReceiptPersistence
     from tests.production_advisory_support import FakeMT5Client, FakeRecordPersistence, build_config
 
     class FailingFlowBootstrap:
@@ -187,7 +188,7 @@ async def test_post_shutdown_after_failed_startup_is_safe_with_real_composer() -
         tracking_persistence=FakeRecordPersistence(),
         provenance_persistence=FakeRecordPersistence(),
     )
-    service = ApplicationAdvisoryService(composer=composer)
+    service = ApplicationAdvisoryService(composer=composer, cycle_receipt_persistence=FakeCycleReceiptPersistence())
     app = build_bot(token=_FAKE_TOKEN, service=service, symbol="EURUSD", allowlist=frozenset({42}))
 
     with pytest.raises(RuntimeError, match="flow bootstrap start failed"):

@@ -35,6 +35,7 @@ from pathlib import Path
 from pydantic import SecretStr, ValidationError
 
 from app.application.advisory_service import ApplicationAdvisoryService
+from app.application.cycle_receipt import CycleReceiptPersistence
 from app.core.config.high_impact_event_bridge import HighImpactEventCalendarTimezoneConfig
 from app.core.config.mt5_rollover import MT5RolloverPolicyConfig
 from app.core.enums.instrument import ContractType
@@ -47,6 +48,13 @@ from app.production_advisory.config import ProductionAdvisoryConfig
 _DEFAULT_ROLLOVER_STATE_PATH = "./data/rollover_state.json"
 _DEFAULT_TRACKING_DIR = "./data/tracking"
 _DEFAULT_PROVENANCE_DIR = "./data/provenance"
+_DEFAULT_CYCLE_RECEIPT_DIR = "./data/cycle_receipts"
+"""Deliberately a sibling of tracking/provenance, never nested inside either:
+both of those directories are globbed by trade_id (``MT5RecommendationPersistence.
+list_trade_ids()``/``MT5RecommendationProvenancePersistence.list_trade_ids()``)
+and feed real Stage 10E tracking-advancement logic every cycle - a
+logical_cycle_id-keyed receipt file must never be placed where that scan
+could ever see it (corrective design closure, "CYCLE-LEVEL IDEMPOTENCY")."""
 _DEFAULT_OPENAI_TIMEOUT_SECONDS = 30.0
 """This bootstrap module's own operational default - ``OpenAIExplanationClientConfig.
 timeout_seconds`` itself has no domain-level default (a required field), so a
@@ -232,12 +240,28 @@ def build_production_advisory_config_from_env() -> ProductionAdvisoryConfig:
 
 def build_production_advisory_service() -> ApplicationAdvisoryService:
     """Construct one ``ProductionAdvisoryComposer`` from the environment and
-    wrap it in one ``ApplicationAdvisoryService``. Never calls ``.startup()``/
-    ``.run_cycle()``/``.shutdown()`` - lifecycle ownership belongs to the
-    caller (FastAPI ``lifespan``)."""
+    wrap it in one ``ApplicationAdvisoryService``, together with the one
+    ``CycleReceiptPersistence`` that gives ``logical_cycle_id`` cycle-level
+    idempotency (corrective design closure, "CYCLE-LEVEL IDEMPOTENCY") - the
+    only real production ``ApplicationAdvisoryService`` construction site in
+    this repository, so this is the one place that must never leave a real
+    caller without it. Never calls ``.startup()``/``.run_cycle()``/
+    ``.shutdown()`` - lifecycle ownership belongs to the caller (FastAPI
+    ``lifespan``).
+
+    ``ADVISORY_CYCLE_RECEIPT_DIR`` is deliberately parsed here, not inside
+    ``build_production_advisory_config_from_env()``: it is an
+    Application-layer concern (``ApplicationAdvisoryService`` is the sole
+    owner of ``logical_cycle_id`` semantics - ``ProductionAdvisoryComposer``/
+    ``ProductionAdvisoryConfig`` never see a ``logical_cycle_id`` at all), so
+    it is never threaded through the unrelated, unchanged Stage0D/production
+    market-and-provider configuration.
+    """
     config = build_production_advisory_config_from_env()
     composer = ProductionAdvisoryComposer(config=config)
-    return ApplicationAdvisoryService(composer=composer)
+    cycle_receipt_directory = _parse_path_env("ADVISORY_CYCLE_RECEIPT_DIR", default=_DEFAULT_CYCLE_RECEIPT_DIR)
+    cycle_receipt_persistence = CycleReceiptPersistence(cycle_receipt_directory)
+    return ApplicationAdvisoryService(composer=composer, cycle_receipt_persistence=cycle_receipt_persistence)
 
 
 __all__ = [

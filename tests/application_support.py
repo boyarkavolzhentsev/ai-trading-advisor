@@ -27,6 +27,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from app.application.cycle_receipt import CycleReceiptClaimResult
 from app.core.enums.decision_risk_pipeline import DecisionRiskPipelineOutcome
 from app.core.enums.explanation import ExplanationContentStatus, ExplanationProviderStatus
 from app.core.enums.final_recommendation import FinalRecommendationVerdict
@@ -65,6 +66,26 @@ from app.production_advisory.result import ProductionAdvisoryCycleOutcome, Produ
 AS_OF = datetime(2026, 1, 2, 14, 30, 0, tzinfo=UTC)
 VALID_UNTIL = datetime(2026, 1, 2, 18, 0, 0, tzinfo=UTC)
 SYMBOL = "EURUSD"
+
+
+class FakeCycleReceiptPersistence:
+    """In-memory stand-in for ``CycleReceiptPersistence`` - same one-method
+    surface (``claim``), an in-memory ``set`` instead of real files. Correct
+    for unit tests that exercise ``ApplicationAdvisoryService`` error-mapping/
+    clock-ownership behavior without real file I/O; restart/corruption/
+    concurrency scenarios use the real, file-backed ``CycleReceiptPersistence``
+    instead (see ``tests/test_application_cycle_idempotency.py``)."""
+
+    def __init__(self) -> None:
+        self._claimed: set[str] = set()
+        self.claim_calls: list[str] = []
+
+    def claim(self, logical_cycle_id: str, *, accepted_at: object) -> CycleReceiptClaimResult:
+        self.claim_calls.append(logical_cycle_id)
+        if logical_cycle_id in self._claimed:
+            return CycleReceiptClaimResult.ALREADY_EXISTS
+        self._claimed.add(logical_cycle_id)
+        return CycleReceiptClaimResult.CREATED
 
 
 class _SetupResultView:
@@ -398,6 +419,7 @@ __all__ = [
     "event_family_result",
     "event_result",
     "explanation_result",
+    "FakeCycleReceiptPersistence",
     "final_construction_result",
     "final_family_result",
     "final_recommendation",

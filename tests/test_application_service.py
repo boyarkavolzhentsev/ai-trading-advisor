@@ -26,6 +26,7 @@ from app.core.enums.strategy_router import StrategyFamily
 from app.production_advisory.errors import ProductionAdvisoryDuplicateCycleError, ProductionAdvisoryLifecycleError
 from app.production_advisory.result import ProductionAdvisoryCycleOutcome
 from tests.application_support import (
+    FakeCycleReceiptPersistence,
     full_actionable_pipeline,
     netting_guard,
     production_advisory_cycle_result,
@@ -103,7 +104,7 @@ async def test_exactly_one_wall_clock_capture_per_call(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(service_module, "datetime", FrozenDatetime)
     composer = FakeComposer(result=_service_unavailable_cycle())
-    service = ApplicationAdvisoryService(composer=composer)
+    service = ApplicationAdvisoryService(composer=composer, cycle_receipt_persistence=FakeCycleReceiptPersistence())
     await service.create_advisory(logical_cycle_id="cycle-1")
 
     assert calls["count"] == 1
@@ -115,7 +116,7 @@ async def test_derived_trade_ids_passed_unchanged() -> None:
     from app.application.identity import derive_trade_ids
 
     composer = FakeComposer(result=_service_unavailable_cycle())
-    service = ApplicationAdvisoryService(composer=composer)
+    service = ApplicationAdvisoryService(composer=composer, cycle_receipt_persistence=FakeCycleReceiptPersistence())
     await service.create_advisory(logical_cycle_id="cycle-abc")
 
     assert composer.run_cycle_calls[0]["trade_ids"] == derive_trade_ids("cycle-abc")
@@ -124,7 +125,7 @@ async def test_derived_trade_ids_passed_unchanged() -> None:
 @pytest.mark.asyncio
 async def test_no_cache_no_second_run_cycle_invocation() -> None:
     composer = FakeComposer(result=_service_unavailable_cycle())
-    service = ApplicationAdvisoryService(composer=composer)
+    service = ApplicationAdvisoryService(composer=composer, cycle_receipt_persistence=FakeCycleReceiptPersistence())
     await service.create_advisory(logical_cycle_id="cycle-1")
     assert len(composer.run_cycle_calls) == 1
     # a second, distinct logical_cycle_id triggers a second, independent call -
@@ -151,7 +152,7 @@ def test_advisory_service_never_reads_wall_clock_outside_create_advisory() -> No
 @pytest.mark.asyncio
 async def test_service_unavailable_returns_structured_response_not_exception() -> None:
     composer = FakeComposer(result=_service_unavailable_cycle())
-    service = ApplicationAdvisoryService(composer=composer)
+    service = ApplicationAdvisoryService(composer=composer, cycle_receipt_persistence=FakeCycleReceiptPersistence())
     response = await service.create_advisory(logical_cycle_id="cycle-1")
 
     from app.application.dto import ApplicationAdvisoryStatus
@@ -173,7 +174,7 @@ def test_service_unavailable_error_class_does_not_exist() -> None:
 async def test_duplicate_cycle_error_preserves_identity_and_colliding_ids() -> None:
     colliding = ("cycle-1__TREND_FOLLOWING",)
     composer = FakeComposer(run_cycle_exception=ProductionAdvisoryDuplicateCycleError(colliding))
-    service = ApplicationAdvisoryService(composer=composer)
+    service = ApplicationAdvisoryService(composer=composer, cycle_receipt_persistence=FakeCycleReceiptPersistence())
 
     with pytest.raises(DuplicateCycleError) as exc_info:
         await service.create_advisory(logical_cycle_id="cycle-1")
@@ -184,20 +185,26 @@ async def test_duplicate_cycle_error_preserves_identity_and_colliding_ids() -> N
 
 @pytest.mark.asyncio
 async def test_duplicate_retry_does_not_regenerate_identity() -> None:
+    """First attempt: the composer itself reports a Stage0D-level duplicate
+    (e.g. pre-existing persisted trade state) - mapped to DuplicateCycleError
+    as before, composer called once. Second attempt with the SAME
+    logical_cycle_id: the cycle-receipt claim (already consumed by the first
+    attempt, regardless of its outcome) rejects it before the composer is
+    ever called again - no new identity is ever generated for the retry, and
+    the composer sees at most one call total."""
     composer = FakeComposer(run_cycle_exception=ProductionAdvisoryDuplicateCycleError(("x",)))
-    service = ApplicationAdvisoryService(composer=composer)
+    service = ApplicationAdvisoryService(composer=composer, cycle_receipt_persistence=FakeCycleReceiptPersistence())
     with pytest.raises(DuplicateCycleError):
         await service.create_advisory(logical_cycle_id="cycle-1")
     with pytest.raises(DuplicateCycleError):
         await service.create_advisory(logical_cycle_id="cycle-1")
-    # both attempts derived and sent the identical trade_ids mapping - no new identity.
-    assert composer.run_cycle_calls[0]["trade_ids"] == composer.run_cycle_calls[1]["trade_ids"]
+    assert len(composer.run_cycle_calls) == 1
 
 
 @pytest.mark.asyncio
 async def test_lifecycle_error_from_run_cycle_maps_to_application_state_error() -> None:
     composer = FakeComposer(run_cycle_exception=ProductionAdvisoryLifecycleError("not started"))
-    service = ApplicationAdvisoryService(composer=composer)
+    service = ApplicationAdvisoryService(composer=composer, cycle_receipt_persistence=FakeCycleReceiptPersistence())
     with pytest.raises(ApplicationStateError):
         await service.create_advisory(logical_cycle_id="cycle-1")
 
@@ -205,7 +212,7 @@ async def test_lifecycle_error_from_run_cycle_maps_to_application_state_error() 
 @pytest.mark.asyncio
 async def test_lifecycle_error_from_startup_maps_to_application_state_error() -> None:
     composer = FakeComposer(startup_exception=ProductionAdvisoryLifecycleError("cannot restart"))
-    service = ApplicationAdvisoryService(composer=composer)
+    service = ApplicationAdvisoryService(composer=composer, cycle_receipt_persistence=FakeCycleReceiptPersistence())
     with pytest.raises(ApplicationStateError):
         await service.startup()
 
@@ -213,7 +220,7 @@ async def test_lifecycle_error_from_startup_maps_to_application_state_error() ->
 @pytest.mark.asyncio
 async def test_invalid_logical_cycle_id_raises_input_error_without_calling_run_cycle() -> None:
     composer = FakeComposer(result=_service_unavailable_cycle())
-    service = ApplicationAdvisoryService(composer=composer)
+    service = ApplicationAdvisoryService(composer=composer, cycle_receipt_persistence=FakeCycleReceiptPersistence())
     with pytest.raises(ApplicationInputError):
         await service.create_advisory(logical_cycle_id="has:colon")
     assert composer.run_cycle_calls == []
@@ -222,7 +229,7 @@ async def test_invalid_logical_cycle_id_raises_input_error_without_calling_run_c
 @pytest.mark.asyncio
 async def test_stage0d_value_error_after_valid_identity_maps_to_internal_error() -> None:
     composer = FakeComposer(run_cycle_exception=ValueError("trade_ids missing entries for: ['BREAKOUT']"))
-    service = ApplicationAdvisoryService(composer=composer)
+    service = ApplicationAdvisoryService(composer=composer, cycle_receipt_persistence=FakeCycleReceiptPersistence())
     with pytest.raises(InternalApplicationError):
         await service.create_advisory(logical_cycle_id="cycle-1")
 
@@ -231,7 +238,7 @@ async def test_stage0d_value_error_after_valid_identity_maps_to_internal_error()
 async def test_unexpected_exception_does_not_leak_secret_in_outward_message() -> None:
     secret = "sk-FAKE-SECRET-VALUE-1234567890"
     composer = FakeComposer(run_cycle_exception=RuntimeError(f"connection failed, api_key={secret}"))
-    service = ApplicationAdvisoryService(composer=composer)
+    service = ApplicationAdvisoryService(composer=composer, cycle_receipt_persistence=FakeCycleReceiptPersistence())
     with pytest.raises(InternalApplicationError) as exc_info:
         await service.create_advisory(logical_cycle_id="cycle-1")
 
@@ -244,7 +251,7 @@ async def test_unexpected_exception_does_not_leak_secret_in_outward_message() ->
 @pytest.mark.asyncio
 async def test_lifecycle_delegates_to_composer_exactly_once() -> None:
     composer = FakeComposer()
-    service = ApplicationAdvisoryService(composer=composer)
+    service = ApplicationAdvisoryService(composer=composer, cycle_receipt_persistence=FakeCycleReceiptPersistence())
     await service.startup()
     await service.shutdown()
     assert composer.startup_calls == 1
