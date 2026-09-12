@@ -8,16 +8,30 @@ reader + the deterministic runtime-cycle orchestrator
 (``run_runtime_cycle``) + the LLM explanation layer.
 
 Owns every side effect this layer is approved to own: the one shared
-``BinanceRestClient``, Flow's realtime start/stop lifecycle, the process-
-local cycle lock, and the duplicate-cycle persistence preflight. Owns
-NOTHING already owned by a closed module: it never calls
-``MT5ClientProtocol.initialize``/``account_facts``/``positions``/
-``history_deals``/``symbol_facts``/``shutdown`` directly -
-``run_runtime_cycle`` remains the sole owner of every per-cycle MT5 read
-(and of MT5 initialize/shutdown itself, which it already performs per call)
-- never reproduces Judge/Risk/Portfolio/Session/Setup-Construction logic,
-and never generates a ``trade_id`` or a business-logic wall-clock timestamp
-of its own: both ``as_of`` and ``trade_ids`` are caller-supplied on every
+``BinanceRestClient`` (Flow's own transport - Technical no longer shares it
+as of the MT5 Price Authority Stage B wiring), the one shared
+``MT5ClientProtocol``-typed connection (used by both the Technical
+``MT5OHLCVProvider`` and ``run_runtime_cycle``'s own per-cycle MT5 reads),
+Flow's realtime start/stop lifecycle, the process-local cycle lock, and the
+duplicate-cycle persistence preflight.
+
+MT5 Price Authority Stage B lifecycle correction: ``run_cycle`` - not
+``run_runtime_cycle`` - is now the sole owner of the per-cycle MT5
+connection's ``initialize()``/``shutdown()`` lifecycle (exactly one pair
+per cycle, in a ``try``/``finally`` guaranteeing ``shutdown()`` on any
+failure). This moved here because Technical's own MT5 OHLCV read
+(``MT5OHLCVProvider.get_ohlcv`` -> ``MT5Client.rates()``) now happens
+through this SAME connection, and it must happen BEFORE
+``run_runtime_cycle`` is even called (its result is one of that function's
+own parameters) - so only this composer can bracket exactly one
+initialize/shutdown pair around both the Technical and the runtime MT5
+reads. ``run_runtime_cycle`` still owns every per-cycle MT5 *runtime* read
+(``account_facts``/``positions``/``history_deals``/``symbol_facts``) and
+still applies the identical ``MT5ConnectivityState.AVAILABLE`` policy to
+the ``runtime_status`` this composer now supplies it explicitly - it never
+reproduces Judge/Risk/Portfolio/Session/Setup-Construction logic, and never
+generates a ``trade_id`` or a business-logic wall-clock timestamp of its
+own: both ``as_of`` and ``trade_ids`` are caller-supplied on every
 ``run_cycle`` call.
 """
 
@@ -39,8 +53,9 @@ from app.llm.openai_client import OpenAIExplanationClient
 from app.llm.protocols import ExplanationLLMClient
 from app.market_data.providers.binance.client import BinanceRestClient
 from app.market_data.providers.binance.futures.constants import BINANCE_FUTURES_BASE_URL, DEFAULT_TIMEOUT_SECONDS
-from app.market_data.providers.binance.futures.provider import BinanceFuturesMarketDataProvider
+from app.market_data.providers.mt5 import MT5_V1_TECHNICAL_TIMEFRAMES, MT5OHLCVProvider
 from app.mt5.client import MT5Client
+from app.mt5.errors import MT5NotInitializedError
 from app.mt5.persistence import MT5RolloverStatePersistence
 from app.mt5.protocols import MT5ClientProtocol
 from app.mt5.recommendation_persistence import MT5RecommendationPersistence
@@ -70,12 +85,31 @@ def _default_flow_bootstrap(config: ProductionAdvisoryConfig, rest_client: Binan
 
 
 def _default_technical_composer(
-    config: ProductionAdvisoryConfig, rest_client: BinanceRestClient
+    config: ProductionAdvisoryConfig, mt5_client: MT5ClientProtocol
 ) -> TechnicalProductionComposer:
-    provider = BinanceFuturesMarketDataProvider(rest_client)
+    """MT5 Price Authority Stage B production wiring: Technical is composed
+    against ``MT5OHLCVProvider`` - the MT5 symbol identity
+    (``symbol_mapping.mt5_symbol``, never ``binance_symbol``) and the MT5 V1
+    timeframe preset (``MT5_V1_TECHNICAL_TIMEFRAMES``, which excludes D1).
+    ``server_timezone`` reuses the already-authoritative
+    ``MT5RolloverPolicyConfig.rollover_timezone`` value the operator already
+    configured for rollover - no second, independent MT5 timezone
+    environment variable is introduced. Flow remains wired to the Binance
+    Futures provider separately (see ``_default_flow_bootstrap``) - this
+    function touches nothing Flow-related.
+
+    ``mt5_client`` is the SAME ``MT5ClientProtocol``-typed instance
+    ``ProductionAdvisoryComposer`` also uses for its own per-cycle MT5 reads
+    (a real ``MT5Client`` in production; any structurally-compatible test
+    double - one that also implements ``rates()`` - in tests). Never a
+    second, independently-constructed MT5 connection: sharing this single
+    instance is exactly why ``self._mt5_client`` is now built before
+    ``self._technical_composer`` in ``ProductionAdvisoryComposer.__init__``."""
+    provider = MT5OHLCVProvider(client=mt5_client, server_timezone=config.rollover_policy.rollover_timezone)
     return TechnicalProductionComposer(
-        config=TechnicalProductionConfig(symbol=config.symbol_mapping.binance_symbol, contract_type=config.contract_type),
+        config=TechnicalProductionConfig(symbol=config.symbol_mapping.mt5_symbol, contract_type=config.contract_type),
         provider=provider,
+        timeframes=MT5_V1_TECHNICAL_TIMEFRAMES,
     )
 
 
@@ -116,14 +150,15 @@ class ProductionAdvisoryComposer:
         self._flow_bootstrap = (
             flow_bootstrap if flow_bootstrap is not None else _default_flow_bootstrap(config, self._rest_client)
         )
-        self._technical_composer = (
-            technical_composer
-            if technical_composer is not None
-            else _default_technical_composer(config, self._rest_client)
-        )
 
         self._mt5_client: MT5ClientProtocol = (
             mt5_client if mt5_client is not None else MT5Client(path=config.mt5_path, credentials=config.mt5_credentials)
+        )
+
+        self._technical_composer = (
+            technical_composer
+            if technical_composer is not None
+            else _default_technical_composer(config, self._mt5_client)
         )
 
         self._rollover_persistence = (
@@ -153,8 +188,10 @@ class ProductionAdvisoryComposer:
 
     async def startup(self) -> None:
         """Starts Flow's realtime bootstrap only. Never initializes MT5 -
-        ``run_runtime_cycle`` already owns MT5 initialize/shutdown per call
-        (see its own docstring). Calendar path existence is never checked
+        ``run_cycle`` owns exactly one MT5 initialize/shutdown pair per call
+        (see this class's own docstring) - a process-lifetime connection
+        held open from ``startup()`` is deliberately not this stage's
+        design. Calendar path existence is never checked
         here - a missing file is a normal, expected, per-cycle-re-evaluated
         state (see ``run_cycle``'s calendar read), not a startup blocker.
         Timezone config validation already happened at
@@ -206,6 +243,12 @@ class ProductionAdvisoryComposer:
     ) -> ProductionAdvisoryCycleResult:
         """Run exactly one production advisory cycle.
 
+        Opens exactly one MT5 ``initialize()``/``shutdown()`` pair around
+        both the Technical MT5 OHLCV read and every runtime MT5 read this
+        call performs (see this class's own docstring) - ``shutdown()`` is
+        guaranteed via ``finally`` even if Technical or ``run_runtime_cycle``
+        raises.
+
         ``as_of`` and ``trade_ids`` are both caller-supplied on every call -
         this method never reads the wall clock for business logic and never
         generates a trade_id (no ``uuid``/``random``/``secrets`` anywhere in
@@ -235,64 +278,110 @@ class ProductionAdvisoryComposer:
 
             flow_result = self._flow_bootstrap.build_flow_result(as_of=as_of)
 
-            technical_result = await asyncio.to_thread(self._technical_composer.build_technical_result, as_of=as_of)
+            # --- one MT5 connection lifecycle for this whole cycle (MT5
+            # Price Authority Stage B lifecycle correction) --------------
+            #
+            # Technical's own MT5 OHLCV reads, when (as in the real default
+            # production wiring - see ``_default_technical_composer``)
+            # ``self._technical_composer`` is backed by
+            # ``MT5OHLCVProvider(client=self._mt5_client, ...)``, go through
+            # the SAME ``self._mt5_client`` instance ``run_runtime_cycle``
+            # reads from below. ``MT5Client.rates()`` requires a successful
+            # prior ``initialize()`` call (raises ``MT5NotInitializedError``
+            # otherwise - never a ``MarketDataError``, so Technical's own
+            # per-timeframe ``except MarketDataError`` would never catch it)
+            # - so ``initialize()`` must happen here, BEFORE the Technical
+            # fetch, not inside ``run_runtime_cycle`` (which used to own it,
+            # but which is only called afterward, with Technical's own
+            # result as one of its parameters). This composer is therefore
+            # now the sole owner of exactly one initialize/shutdown pair per
+            # cycle, bracketing both the Technical and the runtime MT5 reads
+            # - ``shutdown()`` is guaranteed by ``finally`` regardless of
+            # whether Technical or ``run_runtime_cycle`` raises.
+            try:
+                runtime_status = self._mt5_client.initialize()
 
-            if technical_result.fetch_failures:
-                # Approved V1 Technical safety policy: any current-cycle
-                # fetch failure discards the entire Technical result for
-                # this cycle rather than trusting retained-but-unprovably-
-                # fresh Stage 3A history. Never a partial per-cell patch.
-                # binance_reference_price is discarded in lockstep (corrective
-                # design closure, "PROVIDER SYMBOL SPLIT + PRICE-BASIS
-                # RECONCILIATION") - a retained old M15 close must never
-                # survive independently into Setup Construction once this
-                # cycle's own Technical contour has been safety-discarded;
-                # that would be a hidden stale-reference-price seam.
-                technical = None
-                m15_market_structure = None
-                binance_reference_price = None
-            else:
-                technical = technical_result.technical
-                m15_market_structure = technical_result.m15_market_structure
-                binance_reference_price = technical_result.m15_last_closed_close
+                # Always attempted, never gated on ``runtime_status`` here:
+                # this composer must stay agnostic to whether the injected
+                # ``self._technical_composer`` is actually MT5-backed at all
+                # (an injected test double, or a future non-MT5 Technical
+                # wiring, never touches ``self._mt5_client``). When it IS
+                # MT5-backed and the shared connection never became usable
+                # this cycle, ``MT5NotInitializedError`` is caught just
+                # below and treated exactly like any other full-cycle fetch
+                # failure - a partially-usable connection
+                # (``TERMINAL_UNAVAILABLE``/``ACCOUNT_UNAVAILABLE``) is
+                # already handled gracefully one layer down, inside
+                # ``build_technical_result`` itself, via the ordinary
+                # per-timeframe ``MarketDataError`` catch.
+                try:
+                    technical_result = await asyncio.to_thread(
+                        self._technical_composer.build_technical_result, as_of=as_of
+                    )
+                except MT5NotInitializedError:
+                    technical_result = None
 
-            high_impact_event_context = read_high_impact_event_context(
-                self._config.calendar_bridge_path,
-                as_of=as_of,
-                staleness_threshold=self._config.calendar_staleness_threshold,
-                timezone_config=self._config.calendar_server_timezone,
-            )
+                if technical_result is None or technical_result.fetch_failures:
+                    # Approved V1 Technical safety policy: any current-cycle
+                    # fetch failure (now including "MT5 connection was never
+                    # AVAILABLE this cycle") discards the entire Technical
+                    # result for this cycle rather than trusting retained-
+                    # but-unprovably-fresh Stage 3A history. Never a partial
+                    # per-cell patch. binance_reference_price is discarded in
+                    # lockstep (corrective design closure, "PROVIDER SYMBOL
+                    # SPLIT + PRICE-BASIS RECONCILIATION") - a retained old
+                    # M15 close must never survive independently into Setup
+                    # Construction once this cycle's own Technical contour
+                    # has been safety-discarded; that would be a hidden
+                    # stale-reference-price seam.
+                    technical = None
+                    m15_market_structure = None
+                    binance_reference_price = None
+                else:
+                    technical = technical_result.technical
+                    m15_market_structure = technical_result.m15_market_structure
+                    binance_reference_price = technical_result.m15_last_closed_close
 
-            context = MarketEvaluationContext(
-                symbol=self._config.symbol_mapping.binance_symbol,
-                contract_type=self._config.contract_type,
-                base_asset=self._config.base_asset,
-                network=self._config.network,
-                currency_exposures=self._config.currency_exposures,
-            )
+                high_impact_event_context = read_high_impact_event_context(
+                    self._config.calendar_bridge_path,
+                    as_of=as_of,
+                    staleness_threshold=self._config.calendar_staleness_threshold,
+                    timezone_config=self._config.calendar_server_timezone,
+                )
 
-            runtime_cycle_result = run_runtime_cycle(
-                client=self._mt5_client,
-                as_of=as_of,
-                rollover_policy=self._config.rollover_policy,
-                rollover_persistence=self._rollover_persistence,
-                tracking_persistence=self._tracking_persistence,
-                provenance_persistence=self._provenance_persistence,
-                trading_cycle_config=self._config.trading_cycle_config,
-                market=self._config.market,
-                trade_ids=trade_ids,
-                context=context,
-                mt5_symbol=self._config.symbol_mapping.mt5_symbol,
-                binance_reference_price=binance_reference_price,
-                max_price_basis_divergence_percent=self._config.max_price_basis_divergence_percent,
-                flow=flow_result,
-                technical=technical,
-                external=None,
-                m15_market_structure=m15_market_structure,
-                locked_override=self._config.locked_override,
-                high_impact_event_context=high_impact_event_context,
-                high_impact_event_symbol_scope_config=self._config.event_symbol_scope_config,
-            )
+                context = MarketEvaluationContext(
+                    symbol=self._config.symbol_mapping.binance_symbol,
+                    contract_type=self._config.contract_type,
+                    base_asset=self._config.base_asset,
+                    network=self._config.network,
+                    currency_exposures=self._config.currency_exposures,
+                )
+
+                runtime_cycle_result = run_runtime_cycle(
+                    client=self._mt5_client,
+                    runtime_status=runtime_status,
+                    as_of=as_of,
+                    rollover_policy=self._config.rollover_policy,
+                    rollover_persistence=self._rollover_persistence,
+                    tracking_persistence=self._tracking_persistence,
+                    provenance_persistence=self._provenance_persistence,
+                    trading_cycle_config=self._config.trading_cycle_config,
+                    market=self._config.market,
+                    trade_ids=trade_ids,
+                    context=context,
+                    mt5_symbol=self._config.symbol_mapping.mt5_symbol,
+                    binance_reference_price=binance_reference_price,
+                    max_price_basis_divergence_percent=self._config.max_price_basis_divergence_percent,
+                    flow=flow_result,
+                    technical=technical,
+                    external=None,
+                    m15_market_structure=m15_market_structure,
+                    locked_override=self._config.locked_override,
+                    high_impact_event_context=high_impact_event_context,
+                    high_impact_event_symbol_scope_config=self._config.event_symbol_scope_config,
+                )
+            finally:
+                self._mt5_client.shutdown()
 
             if self._llm_enabled:
                 assert self._llm_client is not None  # guaranteed by __init__ whenever _llm_enabled is True
@@ -336,7 +425,7 @@ class ProductionAdvisoryComposer:
                 explanation_result=explanation_result,
                 llm_enabled=self._llm_enabled,
                 flow_health=self._flow_bootstrap.health(),
-                technical_fetch_failures=technical_result.fetch_failures,
+                technical_fetch_failures=technical_result.fetch_failures if technical_result is not None else (),
                 cycle_duration_seconds=cycle_duration_seconds,
             )
 

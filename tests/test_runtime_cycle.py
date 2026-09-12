@@ -58,6 +58,15 @@ def _make_stores(tmp_path: Path):
 
 
 def _run_cycle(tmp_path: Path, client: RuntimeCycleFakeClient, stores=None, **overrides):
+    """Mirrors ``ProductionAdvisoryComposer.run_cycle``'s own MT5 Price
+    Authority Stage B lifecycle contract: this helper - not
+    ``run_runtime_cycle`` itself - now calls ``client.initialize()`` before
+    the cycle and ``client.shutdown()`` after (in ``finally``), threading
+    the obtained ``runtime_status`` through explicitly. Every existing test
+    in this file that asserts ``client.initialize_calls``/``shutdown_calls``
+    continues to see exactly the same counts as before this ownership
+    change - only who calls them moved.
+    """
     rollover_persistence, tracking_persistence, provenance_persistence = stores or _make_stores(tmp_path)
     kwargs = dict(
         client=client,
@@ -77,7 +86,11 @@ def _run_cycle(tmp_path: Path, client: RuntimeCycleFakeClient, stores=None, **ov
         m15_market_structure=actionable_trend_market_structure(),
     )
     kwargs.update(overrides)
-    result = run_runtime_cycle(**kwargs)
+    runtime_status = kwargs["client"].initialize()
+    try:
+        result = run_runtime_cycle(runtime_status=runtime_status, **kwargs)
+    finally:
+        kwargs["client"].shutdown()
     return result, rollover_persistence, tracking_persistence, provenance_persistence
 
 

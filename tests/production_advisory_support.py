@@ -18,10 +18,11 @@ from app.core.enums.instrument import ContractType
 from app.core.enums.market import MarketType
 from app.core.enums.mt5_runtime import MT5ConnectivityState
 from app.core.enums.strategy_router import StrategyFamily
-from app.core.models.mt5_runtime import MT5RuntimeStatus
+from app.core.models.mt5_runtime import MT5AccountFacts, MT5RuntimeStatus
 from app.core.models.stream_health import StreamHealth
 from app.flow.open_interest_poller import TaskHealth, TaskState
 from app.flow.realtime_bootstrap import FlowRealtimeBootstrapHealth
+from app.mt5.errors import MT5NotInitializedError
 from app.production_advisory.config import ProductionAdvisoryConfig, SymbolMapping
 from app.technical.production import TechnicalFetchFailure, TechnicalProductionResult
 
@@ -120,7 +121,20 @@ class FakeMT5Client:
     """Always reports connectivity unavailable - the smallest fake that
     lets a full cycle complete deterministically without touching real
     MT5. Never implements order/execution surfaces (there are none on
-    ``MT5ClientProtocol`` to implement)."""
+    ``MT5ClientProtocol`` to implement).
+
+    ``rates()`` (MT5 Price Authority Stage B lifecycle correction: the
+    default Technical composer wires ``MT5OHLCVProvider(client=mt5_client,
+    ...)`` against this SAME fake) raises ``MT5NotInitializedError`` -
+    exactly like the real ``app.mt5.client.MT5Client`` does - rather than
+    returning ``"UNAVAILABLE"``: this fake's own ``initialize()`` always
+    reports ``INITIALIZATION_FAILED`` (the raw connection itself never
+    succeeds), which in the real client means every initialized-only method
+    raises rather than gracefully degrading, and ``rates()`` must model that
+    faithfully or a genuine "Technical read before MT5 initialize" defect
+    would go undetected (see ``test_production_advisory_mt5_lifecycle.py``
+    for the dedicated lifecycle-ordering fixture, ``LifecycleTrackingMT5Client``,
+    used where a test needs a client that CAN reach ``AVAILABLE``)."""
 
     def initialize(self) -> MT5RuntimeStatus:
         return MT5RuntimeStatus(as_of=datetime.now(UTC), state=MT5ConnectivityState.INITIALIZATION_FAILED, reason="fake: no terminal")
@@ -140,8 +154,103 @@ class FakeMT5Client:
     def history_deals(self, *, start: object, end: object) -> tuple[str, tuple]:
         raise AssertionError("history_deals() must not be called directly by Stage0D")
 
+    def rates(self, *, symbol: str, timeframe: object, count: int) -> tuple[str, tuple]:
+        raise MT5NotInitializedError("rates() called before a successful initialize() (fake: initialize() always fails)")
+
     def shutdown(self) -> None:
         pass
+
+
+class LifecycleTrackingMT5Client:
+    """MT5 Price Authority Stage B lifecycle-correction fixture: implements
+    ``MT5ClientProtocol`` PLUS ``rates()`` (the one extra method
+    ``MT5OHLCVProvider`` needs) with REAL ``MT5Client`` lifecycle fidelity -
+    every initialized-only method raises ``MT5NotInitializedError`` (never
+    ``MarketDataError``, never a graceful ``"UNAVAILABLE"``) until
+    ``initialize()`` has actually reached a non-``INITIALIZATION_FAILED``/
+    ``LOGIN_FAILED`` state, exactly mirroring ``app.mt5.client.MT5Client``'s
+    own ``_initialized`` flag semantics.
+
+    A single shared ``call_log`` records every method call, across BOTH the
+    Technical MT5 OHLCV read path (``rates()``) and every runtime MT5 read
+    (``account_facts``/``positions``/``history_deals``/``symbol_facts``) in
+    the exact order they happened - so a test can assert their real relative
+    ordering, not just individual call counts."""
+
+    def __init__(
+        self,
+        *,
+        runtime_status: MT5RuntimeStatus | None = None,
+        account_facts: MT5AccountFacts | None = None,
+        positions_result: tuple[str, tuple] = ("OK", ()),
+        history_deals_result: tuple[str, tuple] = ("OK", ()),
+        symbol_facts_by_symbol: dict[str, object] | None = None,
+        rates_result: tuple[str, tuple] = ("OK", ()),
+    ) -> None:
+        self._runtime_status = runtime_status or MT5RuntimeStatus(as_of=datetime.now(UTC), state=MT5ConnectivityState.AVAILABLE)
+        self._account_facts = account_facts
+        self._positions_result = positions_result
+        self._history_deals_result = history_deals_result
+        self._symbol_facts_by_symbol = symbol_facts_by_symbol or {}
+        self._rates_result = rates_result
+        self._initialized = False
+
+        self.call_log: list[str] = []
+        self.initialize_calls = 0
+        self.shutdown_calls = 0
+
+    def _require_initialized(self, name: str) -> None:
+        # Logged BEFORE the check, deliberately: the call was genuinely
+        # attempted even when it then raises - a test asserting "this
+        # method was attempted" must see it in ``call_log`` regardless of
+        # outcome, mirroring what a real caller observes (it DID call the
+        # method; the method chose to raise).
+        self.call_log.append(name)
+        if not self._initialized:
+            raise MT5NotInitializedError(f"{name}() called before a successful initialize()")
+
+    def initialize(self) -> MT5RuntimeStatus:
+        self.initialize_calls += 1
+        self.call_log.append("initialize")
+        if self._runtime_status.state not in (MT5ConnectivityState.INITIALIZATION_FAILED, MT5ConnectivityState.LOGIN_FAILED):
+            self._initialized = True
+        return self._runtime_status
+
+    def runtime_status(self) -> MT5RuntimeStatus:
+        self._require_initialized("runtime_status")
+        return self._runtime_status
+
+    def account_facts(self) -> MT5AccountFacts | None:
+        self._require_initialized("account_facts")
+        return self._account_facts
+
+    def positions(self) -> tuple[str, tuple]:
+        self._require_initialized("positions")
+        return self._positions_result
+
+    def history_deals(self, *, start: object, end: object) -> tuple[str, tuple]:
+        self._require_initialized("history_deals")
+        return self._history_deals_result
+
+    def symbol_facts(self, symbol: str) -> object | None:
+        self._require_initialized("symbol_facts")
+        return self._symbol_facts_by_symbol.get(symbol)
+
+    def rates(self, *, symbol: str, timeframe: object, count: int) -> tuple[str, tuple]:
+        self._require_initialized("rates")
+        if self._runtime_status.state is not MT5ConnectivityState.AVAILABLE:
+            # Mirrors the real ``MT5Client.rates()``'s own re-check: once
+            # initialized, a since-degraded connection (``TERMINAL_UNAVAILABLE``/
+            # ``ACCOUNT_UNAVAILABLE``) reports "UNAVAILABLE" gracefully -
+            # never ``MT5NotInitializedError`` - so Technical's own
+            # per-timeframe ``except MarketDataError`` catches it normally.
+            return "UNAVAILABLE", ()
+        return self._rates_result
+
+    def shutdown(self) -> None:
+        self.shutdown_calls += 1
+        self.call_log.append("shutdown")
+        self._initialized = False
 
 
 class FakeRecordPersistence:
@@ -186,6 +295,7 @@ __all__ = [
     "FakeMT5Client",
     "FakeRecordPersistence",
     "FakeTechnicalComposer",
+    "LifecycleTrackingMT5Client",
     "RaisingExplanationClient",
     "all_trade_ids",
     "build_config",

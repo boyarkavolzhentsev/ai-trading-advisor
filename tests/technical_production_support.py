@@ -15,6 +15,7 @@ from decimal import Decimal
 
 from app.core.enums.instrument import ContractType
 from app.core.enums.market import Timeframe
+from app.core.models.base import Timestamp
 from app.core.models.candle import OHLCVCandle
 from app.market_data.timeframes import timeframe_duration
 from app.technical.alignment import expected_open_time
@@ -67,16 +68,20 @@ def make_candles(
 
 class FakeFuturesOHLCVProvider:
     """Fake Futures OHLCV provider, structurally matching
-    ``FuturesMarketDataProvider.get_ohlcv`` exactly, for tests only.
+    ``app.market_data.protocols.OHLCVProvider.get_ohlcv`` exactly (Binance-
+    shaped: accepts ``as_of`` for provider-agnostic call-site compatibility,
+    same as the real ``BinanceFuturesMarketDataProvider``, but never uses it
+    for any fetch/filtering decision), for tests only.
 
-    Records every call for order/parameter assertions. A per-timeframe
-    response is either a scripted candle list (returned, then left in place
-    for subsequent calls unless replaced) or a scripted exception (raised,
-    then left in place unless replaced) - never both at once.
+    Records every call for order/parameter assertions, including the
+    ``as_of`` it was called with. A per-timeframe response is either a
+    scripted candle list (returned, then left in place for subsequent calls
+    unless replaced) or a scripted exception (raised, then left in place
+    unless replaced) - never both at once.
     """
 
     def __init__(self) -> None:
-        self.calls: list[tuple[str, Timeframe, int]] = []
+        self.calls: list[tuple[str, Timeframe, int, Timestamp | None]] = []
         self._responses: dict[Timeframe, list[OHLCVCandle] | Exception] = {}
 
     def set_response(self, timeframe: Timeframe, candles: list[OHLCVCandle]) -> None:
@@ -85,8 +90,10 @@ class FakeFuturesOHLCVProvider:
     def fail(self, timeframe: Timeframe, exc: Exception) -> None:
         self._responses[timeframe] = exc
 
-    def get_ohlcv(self, symbol: str, timeframe: Timeframe, limit: int = 100) -> list[OHLCVCandle]:
-        self.calls.append((symbol, timeframe, limit))
+    def get_ohlcv(
+        self, symbol: str, timeframe: Timeframe, limit: int = 100, *, as_of: Timestamp | None = None
+    ) -> list[OHLCVCandle]:
+        self.calls.append((symbol, timeframe, limit, as_of))
         response = self._responses.get(timeframe, [])
         if isinstance(response, Exception):
             raise response

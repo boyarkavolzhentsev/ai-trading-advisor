@@ -87,7 +87,7 @@ def test_every_fetch_uses_configured_symbol_and_limit_51() -> None:
     composer.build_technical_result(as_of=NOW)
 
     assert TECHNICAL_OHLCV_FETCH_LIMIT == 51
-    for symbol, _timeframe, limit in provider.calls:
+    for symbol, _timeframe, limit, _as_of in provider.calls:
         assert symbol == "ETHUSDT"
         assert limit == 51
 

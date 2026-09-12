@@ -2,11 +2,22 @@
 Part F).
 
 The first intentionally impure runtime-cycle boundary in this repository.
-``run_runtime_cycle`` is the one narrow coordinator that owns every MT5 read
-(``MT5ClientProtocol``), every persistence read/write, and the deterministic
-sequencing that threads one caller-supplied cycle ``as_of`` and one
-read-once/thread-many confirmed positions/history snapshot through the
-already-existing, unmodified pure stages:
+``run_runtime_cycle`` is the one narrow coordinator that owns every MT5
+*read* (``MT5ClientProtocol``), every persistence read/write, and the
+deterministic sequencing that threads one caller-supplied cycle ``as_of``
+and one read-once/thread-many confirmed positions/history snapshot through
+the already-existing, unmodified pure stages:
+
+Does NOT own the MT5 *connection lifecycle* itself (MT5 Price Authority
+Stage B lifecycle correction): ``initialize()``/``shutdown()`` moved to the
+caller (``ProductionAdvisoryComposer.run_cycle``) once Stage B wired
+``TechnicalProductionComposer`` to read MT5 OHLCV through the SAME
+``MT5Client`` this function also reads from - Technical's read happens
+before this function is even called, so only the caller can bracket
+exactly one initialize/shutdown pair around both. This function receives
+the caller's already-obtained ``runtime_status`` and applies the identical
+policy it always has: only ``AVAILABLE`` proceeds, anything else is
+``BLOCKED`` immediately.
 
     Stage 10B rollover -> Stage 10C open risk -> Stage 10D realized daily PnL
     -> Runtime Fact Assembly -> Decision/Risk Pipeline -> Final Recommendation
@@ -59,6 +70,7 @@ from app.core.models.market_evaluation_context import MarketEvaluationContext
 from app.core.models.market_structure_features import MarketStructureFeatures
 from app.core.models.mt5_history import MT5Deal
 from app.core.models.mt5_position import MT5Position
+from app.core.models.mt5_runtime import MT5RuntimeStatus
 from app.core.models.mt5_tracking import MT5TrackedRecommendation
 from app.core.models.runtime_cycle import (
     AdvancedTrackedRecommendationOutcome,
@@ -242,6 +254,7 @@ def _compute_cycle_outcome(
 def run_runtime_cycle(
     *,
     client: MT5ClientProtocol,
+    runtime_status: MT5RuntimeStatus,
     as_of: Timestamp,
     rollover_policy: MT5RolloverPolicyConfig,
     rollover_persistence: MT5RolloverStatePersistence,
@@ -277,6 +290,23 @@ def run_runtime_cycle(
     (``app.high_impact_event_bridge``) remains strictly upstream of this
     module.
 
+    ``runtime_status`` (MT5 Price Authority Stage B lifecycle correction):
+    the caller's own already-obtained ``client.initialize()`` result,
+    supplied explicitly - this coordinator no longer calls
+    ``initialize()``/``shutdown()`` on ``client`` itself. Ownership of the
+    MT5 connection's initialize/shutdown lifecycle moved to the caller
+    (``ProductionAdvisoryComposer.run_cycle``) because Stage B wired
+    ``TechnicalProductionComposer`` to read MT5 OHLCV through this SAME
+    connection, and that Technical read must already be complete before
+    this function is even called (its result arrives via the ``technical``
+    parameter below) - so only the caller can bracket exactly one
+    initialize/shutdown pair around both the Technical and the runtime MT5
+    reads. This function still applies the identical, unchanged policy on
+    the result: only ``MT5ConnectivityState.AVAILABLE`` permits any
+    downstream trading-cycle work to proceed (see that enum's own
+    docstring) - any other state still returns ``BLOCKED`` immediately,
+    exactly as when this function obtained the status itself.
+
     ``mt5_symbol`` (corrective design closure, "PROVIDER SYMBOL SPLIT +
     PRICE-BASIS RECONCILIATION") is the broker-facing symbol every MT5 read
     (``symbol_facts``), the netting guard, and Setup Construction's
@@ -287,241 +317,237 @@ def run_runtime_cycle(
     Construction (via the Decision/Risk Pipeline) - this coordinator never
     computes or interprets either itself.
     """
-    runtime_status = client.initialize()
-    try:
-        if runtime_status.state is not MT5ConnectivityState.AVAILABLE:
-            return RuntimeCycleResult(as_of=as_of, outcome=RuntimeCycleOutcome.BLOCKED, mt5_runtime_status=runtime_status)
+    if runtime_status.state is not MT5ConnectivityState.AVAILABLE:
+        return RuntimeCycleResult(as_of=as_of, outcome=RuntimeCycleOutcome.BLOCKED, mt5_runtime_status=runtime_status)
 
-        account_facts = client.account_facts()
-        account_position_mode = account_facts.margin_mode if account_facts is not None else None
+    account_facts = client.account_facts()
+    account_position_mode = account_facts.margin_mode if account_facts is not None else None
 
-        # --- existing tracking: load once, lexicographic trade_id order ---
-        tracked_by_trade_id: dict[str, MT5TrackedRecommendation] = {}
-        excluded_tracked_recommendations: list[ExcludedTrackedRecommendation] = []
-        for trade_id in tracking_persistence.list_trade_ids():
-            read_status, tracked = tracking_persistence.read(trade_id)
-            if read_status == "VALID":
-                assert tracked is not None
-                tracked_by_trade_id[trade_id] = tracked
-            elif read_status == "ABSENT":
-                continue  # benign race: listed then removed before read - nothing to report
-            else:
-                excluded_tracked_recommendations.append(ExcludedTrackedRecommendation(trade_id=trade_id, read_status=read_status))
+    # --- existing tracking: load once, lexicographic trade_id order ---
+    tracked_by_trade_id: dict[str, MT5TrackedRecommendation] = {}
+    excluded_tracked_recommendations: list[ExcludedTrackedRecommendation] = []
+    for trade_id in tracking_persistence.list_trade_ids():
+        read_status, tracked = tracking_persistence.read(trade_id)
+        if read_status == "VALID":
+            assert tracked is not None
+            tracked_by_trade_id[trade_id] = tracked
+        elif read_status == "ABSENT":
+            continue  # benign race: listed then removed before read - nothing to report
+        else:
+            excluded_tracked_recommendations.append(ExcludedTrackedRecommendation(trade_id=trade_id, read_status=read_status))
 
-        # --- history: read once ---
-        trading_day_key = compute_trading_day_key(as_of=as_of, policy=rollover_policy)
-        trading_day_start, trading_day_end = trading_day_interval(trading_day_key, rollover_policy)
-        history_start = _compute_history_start(trading_day_start=trading_day_start, tracked_by_trade_id=tracked_by_trade_id)
-        history_read_status, deals = client.history_deals(start=history_start, end=as_of)
+    # --- history: read once ---
+    trading_day_key = compute_trading_day_key(as_of=as_of, policy=rollover_policy)
+    trading_day_start, trading_day_end = trading_day_interval(trading_day_key, rollover_policy)
+    history_start = _compute_history_start(trading_day_start=trading_day_start, tracked_by_trade_id=tracked_by_trade_id)
+    history_read_status, deals = client.history_deals(start=history_start, end=as_of)
 
-        # --- advance existing tracking (pure) + persist (impure) ---
-        advanced_pure = _advance_all_existing_tracking(
+    # --- advance existing tracking (pure) + persist (impure) ---
+    advanced_pure = _advance_all_existing_tracking(
+        as_of=as_of,
+        tracked_by_trade_id=tracked_by_trade_id,
+        deals=deals,
+        history_read_status=history_read_status,
+        history_covers_until=as_of,
+    )
+    advanced_tracking: list[AdvancedTrackedRecommendationOutcome] = []
+    advanced_by_trade_id: dict[str, MT5TrackedRecommendation] = {}
+    for trade_id, updated in advanced_pure:
+        persisted = tracking_persistence.write(trade_id, updated)
+        advanced_tracking.append(AdvancedTrackedRecommendationOutcome(trade_id=trade_id, tracked_recommendation=updated, persisted=persisted))
+        advanced_by_trade_id[trade_id] = updated
+
+    # --- positions: read once ---
+    positions_read_status, positions = client.positions()
+
+    # --- rollover (Stage 10B, unmodified) ---
+    rollover_snapshot = None
+    rollover_persisted: bool | None = None
+    if account_facts is not None:
+        persisted_read_status, persisted_state = rollover_persistence.read()
+        rollover_outcome, rollover_state = decide_rollover(
+            current_trading_day_key=trading_day_key,
+            current_equity=account_facts.equity,
             as_of=as_of,
-            tracked_by_trade_id=tracked_by_trade_id,
-            deals=deals,
-            history_read_status=history_read_status,
-            history_covers_until=as_of,
+            policy=rollover_policy,
+            persisted_read_status=persisted_read_status,
+            persisted_state=persisted_state,
         )
-        advanced_tracking: list[AdvancedTrackedRecommendationOutcome] = []
-        advanced_by_trade_id: dict[str, MT5TrackedRecommendation] = {}
-        for trade_id, updated in advanced_pure:
-            persisted = tracking_persistence.write(trade_id, updated)
-            advanced_tracking.append(AdvancedTrackedRecommendationOutcome(trade_id=trade_id, tracked_recommendation=updated, persisted=persisted))
-            advanced_by_trade_id[trade_id] = updated
+        rollover_snapshot = build_rollover_snapshot(
+            as_of=as_of,
+            current_equity=account_facts.equity,
+            floating_pnl=account_facts.floating_pnl,
+            outcome=rollover_outcome,
+            rollover_state=rollover_state,
+        )
+        if rollover_state is not None and rollover_state != persisted_state:
+            rollover_persisted = rollover_persistence.write(rollover_state)
 
-        # --- positions: read once ---
-        positions_read_status, positions = client.positions()
-
-        # --- rollover (Stage 10B, unmodified) ---
-        rollover_snapshot = None
-        rollover_persisted: bool | None = None
-        if account_facts is not None:
-            persisted_read_status, persisted_state = rollover_persistence.read()
-            rollover_outcome, rollover_state = decide_rollover(
-                current_trading_day_key=trading_day_key,
-                current_equity=account_facts.equity,
-                as_of=as_of,
-                policy=rollover_policy,
-                persisted_read_status=persisted_read_status,
-                persisted_state=persisted_state,
-            )
-            rollover_snapshot = build_rollover_snapshot(
-                as_of=as_of,
-                current_equity=account_facts.equity,
-                floating_pnl=account_facts.floating_pnl,
-                outcome=rollover_outcome,
-                rollover_state=rollover_state,
-            )
-            if rollover_state is not None and rollover_state != persisted_state:
-                rollover_persisted = rollover_persistence.write(rollover_state)
-
-        # --- realized daily PnL (Stage 10D, unmodified) - only if history read is OK ---
-        realized_daily_pnl_assessment = None
-        if history_read_status == "OK":
-            realized_daily_pnl_assessment = compute_realized_daily_pnl(
-                as_of=as_of, trading_day_key=trading_day_key, deals=deals, window_start=trading_day_start, window_end=trading_day_end
-            )
-
-        # --- symbol facts: deduplicated, at most once per unique symbol ---
-        target_symbol = mt5_symbol
-        unique_symbols: set[str] = {target_symbol}
-        if positions_read_status == "OK":
-            unique_symbols |= {position.symbol for position in positions}
-        symbol_facts_by_symbol = {}
-        for symbol in sorted(unique_symbols):
-            facts = client.symbol_facts(symbol)
-            if facts is not None:
-                symbol_facts_by_symbol[symbol] = facts
-        target_symbol_facts_available = target_symbol in symbol_facts_by_symbol
-
-        # --- open risk (Stage 10C, unmodified) - only if positions read is OK ---
-        open_risk_assessment = None
-        if positions_read_status == "OK":
-            open_risk_assessment = assess_open_risk(as_of=as_of, positions=positions, symbol_facts_by_symbol=symbol_facts_by_symbol)
-
-        # --- Runtime Fact Assembly - only once all three sub-assessments exist ---
-        account_risk_snapshot_assembly = None
-        if rollover_snapshot is not None and realized_daily_pnl_assessment is not None and open_risk_assessment is not None:
-            account_risk_snapshot_assembly = assemble_account_risk_snapshot(
-                as_of=as_of,
-                rollover_snapshot=rollover_snapshot,
-                realized_daily_pnl_assessment=realized_daily_pnl_assessment,
-                open_risk_assessment=open_risk_assessment,
-            )
-
-        # --- Decision/Risk Pipeline (Stage 5-9, unmodified) ---
-        decision_risk_pipeline_result = None
-        if account_risk_snapshot_assembly is not None:
-            decision_risk_pipeline_result = evaluate_decision_risk_pipeline(
-                flow=flow,
-                technical=technical,
-                external=external,
-                context=context,
-                evaluation_time=as_of,
-                symbol_facts=symbol_facts_by_symbol.get(target_symbol),
-                m15_market_structure=m15_market_structure,
-                broker_symbol=mt5_symbol,
-                binance_reference_price=binance_reference_price,
-                max_price_basis_divergence_percent=max_price_basis_divergence_percent,
-                account_risk_snapshot_assembly=account_risk_snapshot_assembly,
-                trading_cycle_config=trading_cycle_config,
-                locked_override=locked_override,
-                high_impact_event_context=high_impact_event_context,
-                high_impact_event_symbol_scope_config=high_impact_event_symbol_scope_config,
-            )
-
-        # --- Final Recommendation (Stage 10C sizing, unmodified) ---
-        final_recommendation_construction_result = None
-        if decision_risk_pipeline_result is not None and account_facts is not None and target_symbol in symbol_facts_by_symbol:
-            final_recommendation_construction_result = construct_final_recommendations(
-                decision_risk_pipeline_result=decision_risk_pipeline_result,
-                symbol_facts=symbol_facts_by_symbol[target_symbol],
-                account_currency=account_facts.currency,
-                trade_ids=trade_ids,
-                as_of=as_of,
-            )
-
-        # --- NETTING/UNKNOWN issuance guard + Part E tracking creation ---
-        netting_guard_result = None
-        new_tracking_results: tuple = ()
-        new_tracking_persistence_outcomes: list[TrackingIssuancePersistenceOutcome] = []
-
-        if final_recommendation_construction_result is not None:
-            assert account_position_mode is not None  # guaranteed: account_facts required above
-            actionable_count = sum(
-                1
-                for family_result in final_recommendation_construction_result.family_results
-                if family_result.verdict is FinalRecommendationVerdict.ACTIONABLE
-            )
-
-            if account_position_mode is AccountPositionMode.HEDGING:
-                issuance_allowed = actionable_count > 0
-            else:
-                netting_guard_result = _evaluate_netting_guard(
-                    symbol=target_symbol,
-                    account_position_mode=account_position_mode,
-                    positions_read_status=positions_read_status,
-                    positions=positions,
-                    tracked_by_trade_id=advanced_by_trade_id,
-                    actionable_count=actionable_count,
-                )
-                issuance_allowed = netting_guard_result.outcome is NettingIssuanceOutcome.ALLOWED
-
-            if issuance_allowed:
-                new_tracking_results = construct_tracked_recommendations(
-                    final_recommendation_construction_result=final_recommendation_construction_result,
-                    as_of=as_of,
-                    market=market,
-                    pre_existing_positions_read_status=positions_read_status,
-                    pre_existing_positions=positions,
-                )
-                for result in new_tracking_results:
-                    tracking_persisted = False
-                    provenance_persisted = False
-                    if result.tracking_creation_result.outcome is MT5TrackedRecommendationCreationOutcome.CREATED:
-                        tracked = result.tracking_creation_result.tracked_recommendation
-                        assert tracked is not None
-                        tracking_persisted = tracking_persistence.write(result.trade_id, tracked)
-                        provenance_persisted = provenance_persistence.write(result.trade_id, result.provenance)
-                    new_tracking_persistence_outcomes.append(
-                        TrackingIssuancePersistenceOutcome(
-                            trade_id=result.trade_id,
-                            tracking_creation_outcome=result.tracking_creation_result.outcome,
-                            tracking_persisted=tracking_persisted,
-                            provenance_persisted=provenance_persisted,
-                        )
-                    )
-
-        outcome = _compute_cycle_outcome(
-            connectivity_available=True,
-            account_risk_snapshot_assembly_ready=account_risk_snapshot_assembly is not None,
-            any_excluded_tracking=bool(excluded_tracked_recommendations),
-            any_tracking_write_failure=(
-                any(not entry.persisted for entry in advanced_tracking)
-                or any(
-                    entry.tracking_creation_outcome is MT5TrackedRecommendationCreationOutcome.CREATED and not entry.tracking_persisted
-                    for entry in new_tracking_persistence_outcomes
-                )
-            ),
-            any_provenance_write_failure=any(
-                entry.tracking_creation_outcome is MT5TrackedRecommendationCreationOutcome.CREATED and not entry.provenance_persisted
-                for entry in new_tracking_persistence_outcomes
-            ),
-            rollover_write_failed=rollover_persisted is False,
-            positions_read_status=positions_read_status,
-            history_read_status=history_read_status,
-            any_netting_block=(
-                netting_guard_result is not None
-                and netting_guard_result.outcome
-                not in (NettingIssuanceOutcome.ALLOWED, NettingIssuanceOutcome.NO_ACTIONABLE_RECOMMENDATIONS)
-            ),
-            target_symbol_facts_available=target_symbol_facts_available,
+    # --- realized daily PnL (Stage 10D, unmodified) - only if history read is OK ---
+    realized_daily_pnl_assessment = None
+    if history_read_status == "OK":
+        realized_daily_pnl_assessment = compute_realized_daily_pnl(
+            as_of=as_of, trading_day_key=trading_day_key, deals=deals, window_start=trading_day_start, window_end=trading_day_end
         )
 
-        return RuntimeCycleResult(
+    # --- symbol facts: deduplicated, at most once per unique symbol ---
+    target_symbol = mt5_symbol
+    unique_symbols: set[str] = {target_symbol}
+    if positions_read_status == "OK":
+        unique_symbols |= {position.symbol for position in positions}
+    symbol_facts_by_symbol = {}
+    for symbol in sorted(unique_symbols):
+        facts = client.symbol_facts(symbol)
+        if facts is not None:
+            symbol_facts_by_symbol[symbol] = facts
+    target_symbol_facts_available = target_symbol in symbol_facts_by_symbol
+
+    # --- open risk (Stage 10C, unmodified) - only if positions read is OK ---
+    open_risk_assessment = None
+    if positions_read_status == "OK":
+        open_risk_assessment = assess_open_risk(as_of=as_of, positions=positions, symbol_facts_by_symbol=symbol_facts_by_symbol)
+
+    # --- Runtime Fact Assembly - only once all three sub-assessments exist ---
+    account_risk_snapshot_assembly = None
+    if rollover_snapshot is not None and realized_daily_pnl_assessment is not None and open_risk_assessment is not None:
+        account_risk_snapshot_assembly = assemble_account_risk_snapshot(
             as_of=as_of,
-            outcome=outcome,
-            mt5_runtime_status=runtime_status,
-            account_facts=account_facts,
-            account_position_mode=account_position_mode,
-            positions_read_status=positions_read_status,
-            history_read_status=history_read_status,
-            target_symbol_facts_available=target_symbol_facts_available,
             rollover_snapshot=rollover_snapshot,
-            rollover_persisted=rollover_persisted,
             realized_daily_pnl_assessment=realized_daily_pnl_assessment,
             open_risk_assessment=open_risk_assessment,
-            account_risk_snapshot_assembly=account_risk_snapshot_assembly,
-            decision_risk_pipeline_result=decision_risk_pipeline_result,
-            final_recommendation_construction_result=final_recommendation_construction_result,
-            netting_guard_result=netting_guard_result,
-            new_tracking_results=new_tracking_results,
-            new_tracking_persistence_outcomes=tuple(new_tracking_persistence_outcomes),
-            advanced_tracking=tuple(advanced_tracking),
-            excluded_tracked_recommendations=tuple(excluded_tracked_recommendations),
         )
-    finally:
-        client.shutdown()
+
+    # --- Decision/Risk Pipeline (Stage 5-9, unmodified) ---
+    decision_risk_pipeline_result = None
+    if account_risk_snapshot_assembly is not None:
+        decision_risk_pipeline_result = evaluate_decision_risk_pipeline(
+            flow=flow,
+            technical=technical,
+            external=external,
+            context=context,
+            evaluation_time=as_of,
+            symbol_facts=symbol_facts_by_symbol.get(target_symbol),
+            m15_market_structure=m15_market_structure,
+            broker_symbol=mt5_symbol,
+            binance_reference_price=binance_reference_price,
+            max_price_basis_divergence_percent=max_price_basis_divergence_percent,
+            account_risk_snapshot_assembly=account_risk_snapshot_assembly,
+            trading_cycle_config=trading_cycle_config,
+            locked_override=locked_override,
+            high_impact_event_context=high_impact_event_context,
+            high_impact_event_symbol_scope_config=high_impact_event_symbol_scope_config,
+        )
+
+    # --- Final Recommendation (Stage 10C sizing, unmodified) ---
+    final_recommendation_construction_result = None
+    if decision_risk_pipeline_result is not None and account_facts is not None and target_symbol in symbol_facts_by_symbol:
+        final_recommendation_construction_result = construct_final_recommendations(
+            decision_risk_pipeline_result=decision_risk_pipeline_result,
+            symbol_facts=symbol_facts_by_symbol[target_symbol],
+            account_currency=account_facts.currency,
+            trade_ids=trade_ids,
+            as_of=as_of,
+        )
+
+    # --- NETTING/UNKNOWN issuance guard + Part E tracking creation ---
+    netting_guard_result = None
+    new_tracking_results: tuple = ()
+    new_tracking_persistence_outcomes: list[TrackingIssuancePersistenceOutcome] = []
+
+    if final_recommendation_construction_result is not None:
+        assert account_position_mode is not None  # guaranteed: account_facts required above
+        actionable_count = sum(
+            1
+            for family_result in final_recommendation_construction_result.family_results
+            if family_result.verdict is FinalRecommendationVerdict.ACTIONABLE
+        )
+
+        if account_position_mode is AccountPositionMode.HEDGING:
+            issuance_allowed = actionable_count > 0
+        else:
+            netting_guard_result = _evaluate_netting_guard(
+                symbol=target_symbol,
+                account_position_mode=account_position_mode,
+                positions_read_status=positions_read_status,
+                positions=positions,
+                tracked_by_trade_id=advanced_by_trade_id,
+                actionable_count=actionable_count,
+            )
+            issuance_allowed = netting_guard_result.outcome is NettingIssuanceOutcome.ALLOWED
+
+        if issuance_allowed:
+            new_tracking_results = construct_tracked_recommendations(
+                final_recommendation_construction_result=final_recommendation_construction_result,
+                as_of=as_of,
+                market=market,
+                pre_existing_positions_read_status=positions_read_status,
+                pre_existing_positions=positions,
+            )
+            for result in new_tracking_results:
+                tracking_persisted = False
+                provenance_persisted = False
+                if result.tracking_creation_result.outcome is MT5TrackedRecommendationCreationOutcome.CREATED:
+                    tracked = result.tracking_creation_result.tracked_recommendation
+                    assert tracked is not None
+                    tracking_persisted = tracking_persistence.write(result.trade_id, tracked)
+                    provenance_persisted = provenance_persistence.write(result.trade_id, result.provenance)
+                new_tracking_persistence_outcomes.append(
+                    TrackingIssuancePersistenceOutcome(
+                        trade_id=result.trade_id,
+                        tracking_creation_outcome=result.tracking_creation_result.outcome,
+                        tracking_persisted=tracking_persisted,
+                        provenance_persisted=provenance_persisted,
+                    )
+                )
+
+    outcome = _compute_cycle_outcome(
+        connectivity_available=True,
+        account_risk_snapshot_assembly_ready=account_risk_snapshot_assembly is not None,
+        any_excluded_tracking=bool(excluded_tracked_recommendations),
+        any_tracking_write_failure=(
+            any(not entry.persisted for entry in advanced_tracking)
+            or any(
+                entry.tracking_creation_outcome is MT5TrackedRecommendationCreationOutcome.CREATED and not entry.tracking_persisted
+                for entry in new_tracking_persistence_outcomes
+            )
+        ),
+        any_provenance_write_failure=any(
+            entry.tracking_creation_outcome is MT5TrackedRecommendationCreationOutcome.CREATED and not entry.provenance_persisted
+            for entry in new_tracking_persistence_outcomes
+        ),
+        rollover_write_failed=rollover_persisted is False,
+        positions_read_status=positions_read_status,
+        history_read_status=history_read_status,
+        any_netting_block=(
+            netting_guard_result is not None
+            and netting_guard_result.outcome
+            not in (NettingIssuanceOutcome.ALLOWED, NettingIssuanceOutcome.NO_ACTIONABLE_RECOMMENDATIONS)
+        ),
+        target_symbol_facts_available=target_symbol_facts_available,
+    )
+
+    return RuntimeCycleResult(
+        as_of=as_of,
+        outcome=outcome,
+        mt5_runtime_status=runtime_status,
+        account_facts=account_facts,
+        account_position_mode=account_position_mode,
+        positions_read_status=positions_read_status,
+        history_read_status=history_read_status,
+        target_symbol_facts_available=target_symbol_facts_available,
+        rollover_snapshot=rollover_snapshot,
+        rollover_persisted=rollover_persisted,
+        realized_daily_pnl_assessment=realized_daily_pnl_assessment,
+        open_risk_assessment=open_risk_assessment,
+        account_risk_snapshot_assembly=account_risk_snapshot_assembly,
+        decision_risk_pipeline_result=decision_risk_pipeline_result,
+        final_recommendation_construction_result=final_recommendation_construction_result,
+        netting_guard_result=netting_guard_result,
+        new_tracking_results=new_tracking_results,
+        new_tracking_persistence_outcomes=tuple(new_tracking_persistence_outcomes),
+        advanced_tracking=tuple(advanced_tracking),
+        excluded_tracked_recommendations=tuple(excluded_tracked_recommendations),
+    )
 
 
 __all__ = ["run_runtime_cycle"]

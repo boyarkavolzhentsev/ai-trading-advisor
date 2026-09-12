@@ -1,29 +1,39 @@
-"""Stage 0B Technical production wiring: real Binance Futures OHLCV -> the
+"""Stage 0B/MT5 Price Authority Stage B Technical production wiring: real
+OHLCV from an injected, provider-agnostic ``OHLCVProvider`` -> the
 existing, unmodified ``TechnicalFeatureEngine`` -> the existing, unmodified
 seven Stage 3B analysts -> the existing, unmodified ``TechnicalSupervisor``.
 
 ``TechnicalProductionComposer`` owns exactly one configured ``(symbol,
 contract_type)`` pair's long-lived ``TechnicalFeatureEngine`` and, on every
-call to ``build_technical_result``, refreshes all six default timeframes
-from a fresh REST fetch before composing the current production
-``TechnicalSupervisorResult``. It owns no trading/decision logic of any
-kind - no Market Evaluation, Strategy Router, Judge, Policy, Risk,
-Diversification, Statistics/Session, MT5, LLM, or bot/HTTP delivery
-dependency exists here (enforced by
+call to ``build_technical_result``, refreshes every configured timeframe
+(``DEFAULT_TECHNICAL_TIMEFRAMES`` unless the caller injects a different
+preset, e.g. the MT5 V1 timeframe set) from a fresh fetch before composing
+the current production ``TechnicalSupervisorResult``. It owns no
+trading/decision logic of any kind - no Market Evaluation, Strategy Router,
+Judge, Policy, Risk, Diversification, Statistics/Session, MT5, LLM, or
+bot/HTTP delivery dependency exists here (enforced by
 ``tests/test_technical_production_module_hygiene.py``), and it never
 combines this result with Flow evidence of any kind.
 
-Synchronous and REST-only by design: every timeframe fetch is a plain,
-sequential call to an injected ``FuturesMarketDataProvider`` - no
-WebSocket, no background task, no ``asyncio`` anywhere in this module. A
-REST failure for one timeframe never removes that timeframe's six analyst
-cells from the eventual 42-cell matrix: this composer always builds all six
-``TechnicalFeatureSnapshot``s and always runs all seven analysts against
-each one, feeding whatever history is currently retained (including empty
-history) through unchanged. Data insufficiency therefore surfaces only
-through ``FeatureStatus``/``FeatureQuality`` and analyst abstention -
-``TechnicalSupervisorResult.missing_cells`` stays empty under ordinary
-provider degradation - never through an omitted composition cell.
+Provider-agnostic by design (MT5 Price Authority Stage B contract
+correction): every timeframe fetch is a plain, sequential call to an
+injected ``OHLCVProvider`` - no provider-specific import, no
+``isinstance`` branching, no WebSocket, no background task, no
+``asyncio`` anywhere in this module (enforced by
+``tests/test_technical_no_mt5_provider_coupling.py``). The same
+authoritative cycle ``as_of`` is passed to every one of those calls -
+a native-timeframe provider (e.g. Binance) is free to ignore it, while a
+provider that must derive a timeframe internally (e.g. MT5 synthesizing
+H4) relies on it for deterministic closed/forming classification. A fetch
+failure for one timeframe never removes that timeframe's analyst cells from
+the eventual matrix: this composer always builds one
+``TechnicalFeatureSnapshot`` per configured timeframe and always runs all
+seven analysts against each one, feeding whatever history is currently
+retained (including empty history) through unchanged. Data insufficiency
+therefore surfaces only through ``FeatureStatus``/``FeatureQuality`` and
+analyst abstention - ``TechnicalSupervisorResult.missing_cells`` stays
+empty under ordinary provider degradation - never through an omitted
+composition cell.
 
 Only ``app.market_data.exceptions.MarketDataError`` is treated as ordinary,
 expected provider degradation; every other exception (a Stage 3A ingestion
@@ -44,7 +54,7 @@ from app.core.models.base import DomainModel, Symbol, Timestamp
 from app.core.models.market_structure_features import MarketStructureFeatures
 from app.core.models.technical_supervisor_result import TechnicalSupervisorResult
 from app.market_data.exceptions import MarketDataError
-from app.market_data.protocols import FuturesMarketDataProvider
+from app.market_data.protocols import OHLCVProvider
 from app.technical.alignment import split_closed_and_forming
 from app.technical.engine import TechnicalFeatureEngine
 from app.technical.timeframes import DEFAULT_TECHNICAL_TIMEFRAMES
@@ -110,22 +120,29 @@ class TechnicalFetchFailure:
 
 @dataclass(frozen=True, slots=True)
 class TechnicalProductionResult:
-    """Narrow Stage 0B production result: the full 42-cell
-    ``TechnicalSupervisorResult`` plus the one M15 market-structure fact
-    Setup Construction needs, reused verbatim from the same M15 snapshot -
-    never recomputed and never ``Optional`` (Stage 0B always builds all six
-    snapshots, and ``compute_market_structure_features`` always returns a
-    populated object, carrying ``UNAVAILABLE`` quality on empty history
-    rather than being omitted). Carries no raw per-timeframe snapshot and no
-    trading decision field of any kind.
+    """Narrow Stage 0B production result: the full ``TechnicalSupervisorResult``
+    plus the one M15 market-structure fact Setup Construction needs, reused
+    verbatim from the same M15 snapshot - never recomputed and never
+    ``Optional`` (this composer always builds one snapshot per configured
+    timeframe including M15, and ``compute_market_structure_features``
+    always returns a populated object, carrying ``UNAVAILABLE`` quality on
+    empty history rather than being omitted). Carries no raw per-timeframe
+    snapshot and no trading decision field of any kind.
 
     ``m15_last_closed_close`` (corrective design closure, "PROVIDER SYMBOL
-    SPLIT + PRICE-BASIS RECONCILIATION") is the Binance M15 reference price
-    Setup Construction needs to translate a Binance structural stop onto
-    MT5's own price axis - the retained M15 candle store's own most recent
-    CLOSED candle close, never the forming candle, never an extra REST call.
-    ``None`` only when zero M15 history has ever been retained (the very
-    first cycles). The caller (``ProductionAdvisoryComposer``) is
+    SPLIT + PRICE-BASIS RECONCILIATION") is the M15 reference price Setup
+    Construction needs to translate a structural stop onto MT5's own price
+    axis - the retained M15 candle store's own most recent CLOSED candle
+    close, never the forming candle, never an extra fetch. Historically this
+    was always sourced from Binance (the ``m15_last_closed_close``/
+    ``binance_reference_price`` naming throughout this codebase reflects
+    that origin); as of the MT5 Price Authority Stage B production wiring,
+    this composer's configured provider is MT5-backed, so in production
+    this value is now an MT5 M15 close, not Binance's - the naming and the
+    cross-venue basis-divergence semantics built on top of it
+    (``app.decision.setup_construction``) are stale until Stage C's planned
+    cleanup. ``None`` only when zero M15 history has ever been retained (the
+    very first cycles). The caller (``ProductionAdvisoryComposer``) is
     responsible for forcing this to ``None`` alongside
     ``technical``/``m15_market_structure`` whenever the current cycle's own
     Technical contour was safety-discarded for a fetch failure - this field
@@ -140,43 +157,53 @@ class TechnicalProductionResult:
 
 class TechnicalProductionComposer:
     """Owns one long-lived ``TechnicalFeatureEngine`` and composes the
-    current production ``TechnicalProductionResult`` from real Binance
-    Futures OHLCV.
+    current production ``TechnicalProductionResult`` from real OHLCV
+    served by an injected, provider-agnostic ``OHLCVProvider``.
 
-    The Futures OHLCV provider is always injected: this composer never
-    constructs, owns or closes a ``BinanceRestClient`` - that lifecycle
-    belongs to whatever process composition (Stage 0D) wires this composer
-    together with Stage 0A's Flow bootstrap, so the two can share one
-    Futures REST client. ``TechnicalFeatureEngine`` has no close lifecycle
-    of its own, so this composer needs none either.
+    The OHLCV provider is always injected: this composer never constructs,
+    owns or closes any provider's underlying transport (a
+    ``BinanceRestClient``, an ``MT5Client``, or anything else) - that
+    lifecycle belongs to whatever process composition (Stage 0D) wires this
+    composer together with the rest of production. ``TechnicalFeatureEngine``
+    has no close lifecycle of its own, so this composer needs none either.
     """
 
     def __init__(
         self,
         *,
         config: TechnicalProductionConfig,
-        provider: FuturesMarketDataProvider,
+        provider: OHLCVProvider,
+        timeframes: tuple[Timeframe, ...] = DEFAULT_TECHNICAL_TIMEFRAMES,
         engine: TechnicalFeatureEngine | None = None,
         supervisor: TechnicalSupervisor | None = None,
     ) -> None:
+        if Timeframe.M15 not in timeframes:
+            raise ValueError(
+                "timeframes must include Timeframe.M15 - m15_market_structure/m15_last_closed_close "
+                "are required downstream by Setup Construction"
+            )
         self._config = config
         self._provider = provider
+        self._timeframes = timeframes
         self._engine = engine if engine is not None else TechnicalFeatureEngine()
-        self._supervisor = supervisor if supervisor is not None else TechnicalSupervisor()
+        self._supervisor = (
+            supervisor if supervisor is not None else TechnicalSupervisor(expected_timeframes=self._timeframes)
+        )
 
     def build_technical_result(self, *, as_of: Timestamp) -> TechnicalProductionResult:
-        """Refresh every default timeframe from a fresh REST fetch, then
-        build the current production ``TechnicalProductionResult`` from
-        whatever real history is retained afterward.
+        """Refresh every configured timeframe from a fresh fetch, then build
+        the current production ``TechnicalProductionResult`` from whatever
+        real history is retained afterward.
 
-        Always builds exactly six ``TechnicalFeatureSnapshot``s and runs
-        exactly 42 analyst calls, even when one or more REST fetches fail -
-        a fetch failure for one timeframe never removes that timeframe's
-        seven supervisor cells; it only prevents new candles from being
-        recorded for it this cycle, leaving existing retained history (which
-        may be empty) completely untouched. ``as_of`` is used, unchanged and
-        identical, for every one of the six snapshots - never the wall
-        clock, never a per-timeframe value.
+        Always builds exactly one ``TechnicalFeatureSnapshot`` per configured
+        timeframe and runs all seven analysts against each, even when one or
+        more fetches fail - a fetch failure for one timeframe never removes
+        that timeframe's seven supervisor cells; it only prevents new candles
+        from being recorded for it this cycle, leaving existing retained
+        history (which may be empty) completely untouched. ``as_of`` is used,
+        unchanged and identical, for every one of these snapshots AND passed
+        to every ``provider.get_ohlcv`` call - never the wall clock, never a
+        per-timeframe value.
         """
         symbol = self._config.symbol
         contract_type = self._config.contract_type
@@ -186,9 +213,11 @@ class TechnicalProductionComposer:
         m15_snapshot = None
         m15_last_closed_close: Decimal | None = None
 
-        for timeframe in DEFAULT_TECHNICAL_TIMEFRAMES:
+        for timeframe in self._timeframes:
             try:
-                candles = self._provider.get_ohlcv(symbol, timeframe, limit=TECHNICAL_OHLCV_FETCH_LIMIT)
+                candles = self._provider.get_ohlcv(
+                    symbol, timeframe, limit=TECHNICAL_OHLCV_FETCH_LIMIT, as_of=as_of
+                )
             except MarketDataError as exc:
                 fetch_failures.append(TechnicalFetchFailure(timeframe=timeframe, error_type=type(exc).__name__))
             else:
@@ -219,7 +248,7 @@ class TechnicalProductionComposer:
             for analyst in _ANALYSTS:
                 results.append(analyst.analyze(snapshot))
 
-        assert m15_snapshot is not None  # guaranteed: DEFAULT_TECHNICAL_TIMEFRAMES always includes Timeframe.M15
+        assert m15_snapshot is not None  # guaranteed: __init__ rejects any timeframes without Timeframe.M15
 
         technical = self._supervisor.aggregate(results)
         return TechnicalProductionResult(

@@ -189,6 +189,7 @@ def test_advanced_tracking_currency_matches_account_facts_for_arbitrary_currency
     )
     result = run_runtime_cycle(
         client=client,
+        runtime_status=client.initialize(),
         as_of=NOW,
         rollover_policy=MT5RolloverPolicyConfig(rollover_timezone="UTC", rollover_hour=0),
         rollover_persistence=stores[0],
@@ -246,6 +247,7 @@ def test_advanced_tracking_currency_none_when_account_facts_unavailable_pnl_pres
     )
     result = run_runtime_cycle(
         client=client,
+        runtime_status=client.initialize(),
         as_of=SIGNAL_TIME + timedelta(minutes=4),
         rollover_policy=MT5RolloverPolicyConfig(rollover_timezone="UTC", rollover_hour=0),
         rollover_persistence=stores[0],

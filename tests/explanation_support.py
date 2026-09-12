@@ -91,6 +91,11 @@ def _actionable_client(**overrides: object) -> RuntimeCycleFakeClient:
 
 
 def _run(tmp_path: Path, client: RuntimeCycleFakeClient, stores=None, **overrides) -> RuntimeCycleResult:
+    """Mirrors ``ProductionAdvisoryComposer.run_cycle``'s MT5 Price
+    Authority Stage B lifecycle contract: calls ``client.initialize()``
+    before the cycle and ``client.shutdown()`` after, threading the
+    obtained ``runtime_status`` through explicitly - ``run_runtime_cycle``
+    itself no longer owns either call."""
     rollover_persistence, tracking_persistence, provenance_persistence = stores or make_stores(tmp_path)
     kwargs = dict(
         client=client,
@@ -110,7 +115,11 @@ def _run(tmp_path: Path, client: RuntimeCycleFakeClient, stores=None, **override
         m15_market_structure=actionable_trend_market_structure(),
     )
     kwargs.update(overrides)
-    return run_runtime_cycle(**kwargs)
+    runtime_status = kwargs["client"].initialize()
+    try:
+        return run_runtime_cycle(runtime_status=runtime_status, **kwargs)
+    finally:
+        kwargs["client"].shutdown()
 
 
 def ready_actionable_hedging_result(tmp_path: Path) -> RuntimeCycleResult:

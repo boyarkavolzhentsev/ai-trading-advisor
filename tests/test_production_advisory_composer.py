@@ -321,20 +321,19 @@ def test_default_flow_bootstrap_uses_binance_symbol_never_mt5_symbol() -> None:
         rest_client.close()
 
 
-def test_default_technical_composer_uses_binance_symbol_never_mt5_symbol() -> None:
-    from app.market_data.providers.binance.client import BinanceRestClient
+def test_default_technical_composer_uses_mt5_symbol_never_binance_symbol() -> None:
+    """MT5 Price Authority Stage B: ``_default_technical_composer`` must
+    build its ``TechnicalProductionConfig`` from ``symbol_mapping.mt5_symbol``,
+    never ``symbol_mapping.binance_symbol`` - the reverse of Technical's
+    pre-Stage-B Binance-native wiring."""
     from app.production_advisory.config import SymbolMapping
-    from tests.production_advisory_support import build_config
+    from tests.production_advisory_support import FakeMT5Client, build_config
 
     mapping = SymbolMapping(logical_symbol="BTC", binance_symbol="BTCUSDT", mt5_symbol="BTCUSDt")
     config = build_config(symbol_mapping=mapping)
-    rest_client = BinanceRestClient()
-    try:
-        technical_composer = composer_module._default_technical_composer(config, rest_client)
-        assert technical_composer._config.symbol == "BTCUSDT"
-        assert technical_composer._config.symbol != "BTCUSDt"
-    finally:
-        rest_client.close()
+    technical_composer = composer_module._default_technical_composer(config, FakeMT5Client())
+    assert technical_composer._config.symbol == "BTCUSDt"
+    assert technical_composer._config.symbol != "BTCUSDT"
 
 
 # --- Flow health vs. trading evidence ---------------------------------------
@@ -391,22 +390,36 @@ async def test_shutdown_closes_owned_rest_client_exactly_once() -> None:
 
 
 def test_flow_and_technical_share_exactly_one_binance_rest_client() -> None:
-    """When neither Flow nor Technical composer is injected, the real
-    defaults must be built from the SAME shared client - never two
-    separate ones."""
+    """When Flow is not injected, its real default must be built from the
+    SAME shared ``BinanceRestClient`` as ``composer._rest_client`` - never a
+    second, independently-constructed one."""
     composer = ProductionAdvisoryComposer(config=build_config(), mt5_client=FakeMT5Client())
     assert isinstance(composer._rest_client, BinanceRestClient)
     assert composer._flow_bootstrap._rest_client is composer._rest_client  # type: ignore[attr-defined]
-    assert composer._technical_composer._provider._client is composer._rest_client  # type: ignore[attr-defined]
+    composer._rest_client.close()
+
+
+def test_technical_shares_exactly_one_mt5_client_with_runtime_cycle() -> None:
+    """MT5 Price Authority Stage B: when neither ``mt5_client`` nor
+    ``technical_composer`` is injected, the real default Technical
+    ``MT5OHLCVProvider`` must be built from the SAME shared MT5 connection
+    ``run_runtime_cycle`` also uses for this composer's own per-cycle MT5
+    reads - never a second, independently-constructed one."""
+    composer = ProductionAdvisoryComposer(config=build_config())
+    assert composer._technical_composer._provider._client is composer._mt5_client  # type: ignore[attr-defined]
     composer._rest_client.close()
 
 
 @pytest.mark.asyncio
 async def test_stage0d_never_calls_mt5_directly(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``FakeMT5Client`` raises ``AssertionError`` from every method other
-    than ``initialize``/``shutdown`` - proving Stage0D itself never calls
-    them (only the monkeypatched ``run_runtime_cycle`` stand-in is exercised
-    here, so a real call would have to come from the composer directly)."""
+    """``FakeMT5Client`` raises ``AssertionError`` from every runtime-facing
+    method other than ``initialize``/``shutdown``/``rates`` - proving
+    Stage0D itself never calls them directly (only the monkeypatched
+    ``run_runtime_cycle`` stand-in is exercised here, so a real call would
+    have to come from the composer directly; ``rates()`` is exempted
+    because the Technical composer's own ``MT5OHLCVProvider`` is an
+    approved indirect caller of it, exercised via ``build_technical_result``
+    inside ``run_cycle`` below, never by Stage0D itself)."""
     _fake_run_runtime_cycle(monkeypatch)
     composer = _make_composer()
     await composer.startup()

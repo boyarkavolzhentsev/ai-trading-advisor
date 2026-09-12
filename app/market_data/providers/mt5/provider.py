@@ -1,7 +1,11 @@
-"""MT5-backed ``OHLCVProvider`` - Stage A foundation only.
+"""MT5-backed ``OHLCVProvider``.
 
-Not yet wired into ``TechnicalProductionComposer``/``ProductionAdvisoryComposer``
-(that is a later stage). This module owns the one place MT5-specific
+Wired into ``TechnicalProductionComposer``/``ProductionAdvisoryComposer`` as
+of the MT5 Price Authority Stage B production bootstrap wiring
+(``app.production_advisory.composer``) - this module itself still contains
+no import of either: bootstrap wiring is the only place that imports both
+``MT5OHLCVProvider`` and ``TechnicalProductionComposer`` together. This
+module owns the one place MT5-specific
 timeframe semantics are resolved: M1/M5/M15/H1 are direct normalized MT5
 bars; H4 is derived from normalized closed H1 via ``app.market_data.
 providers.mt5.resampler.resample_h4``; D1 is not supported in MT5 V1 (per
@@ -51,6 +55,22 @@ _DIRECT_TIMEFRAMES: frozenset[Timeframe] = frozenset({Timeframe.M1, Timeframe.M5
 mapped unchanged, including the still-forming last candle (never filtered
 here: ``TechnicalProductionComposer`` already owns closed-vs-forming
 handling for direct timeframes today, and must continue to)."""
+
+MT5_V1_TECHNICAL_TIMEFRAMES: tuple[Timeframe, ...] = (
+    Timeframe.M1,
+    Timeframe.M5,
+    Timeframe.M15,
+    Timeframe.H1,
+    Timeframe.H4,
+)
+"""The MT5 V1 Technical timeframe preset (MT5 Price Authority Stage B
+wiring): every timeframe this provider actually supports, in canonical
+order. Deliberately excludes ``Timeframe.D1`` - D1 is not enabled in MT5 V1
+(see this module's own docstring) - so bootstrap wiring must inject this
+preset, never ``app.technical.timeframes.DEFAULT_TECHNICAL_TIMEFRAMES``
+(which still includes D1 for the Binance-native default contour), into
+``TechnicalProductionComposer`` when it is composed against
+``MT5OHLCVProvider``."""
 
 H4_RAW_H1_LOOKBACK = 208
 """Exact raw H1 bars fetched to synthesize H4, per the approved MT5 Price
@@ -117,4 +137,4 @@ class MT5OHLCVProvider:
         return h4_candles[-limit:] if limit < len(h4_candles) else h4_candles
 
 
-__all__ = ["H4_RAW_H1_LOOKBACK", "MT5OHLCVProvider"]
+__all__ = ["H4_RAW_H1_LOOKBACK", "MT5OHLCVProvider", "MT5_V1_TECHNICAL_TIMEFRAMES"]
