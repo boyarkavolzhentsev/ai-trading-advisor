@@ -80,8 +80,6 @@ def _run_cycle(tmp_path: Path, client: RuntimeCycleFakeClient, stores=None, **ov
         trade_ids={StrategyFamily.TREND_FOLLOWING: "trade-1"},
         context=context(),
         mt5_symbol=TARGET_SYMBOL,
-        binance_reference_price=Decimal("100.10"),
-        max_price_basis_divergence_percent=Decimal("100"),
         technical=trend_following_technical(),
         m15_market_structure=actionable_trend_market_structure(),
     )
@@ -160,8 +158,8 @@ def test_full_happy_path_netting_allowed_when_flat_and_uncontested(tmp_path: Pat
 def test_multiple_actionable_netting_blocks_all(tmp_path: Path) -> None:
     # narrower bid/ask spread (0.02 vs the default 0.10) so the real,
     # bid/ask-based broker-minimum-stop check can pass for BOTH directions
-    # simultaneously from one shared Binance reference (see
-    # tests/final_recommendation_support.py::run_pipeline's own docstring).
+    # simultaneously (see tests/final_recommendation_support.py::run_pipeline's
+    # own docstring).
     client = _actionable_client(
         account_facts=default_account_facts(margin_mode=AccountPositionMode.NETTING),
         symbol_facts_by_symbol={TARGET_SYMBOL: symbol_facts(bid=Decimal("100.08"))},
@@ -173,11 +171,6 @@ def test_multiple_actionable_netting_blocks_all(tmp_path: Path) -> None:
         m15_market_structure=opposite_direction_market_structure(),
         flow=full_flow_result(),
         trade_ids={StrategyFamily.TREND_FOLLOWING: "trade-long", StrategyFamily.BREAKOUT: "trade-short"},
-        # a single shared Binance reference strictly between the LONG stop
-        # (100) and the SHORT stop (100.10) - both directions translate
-        # positively (mirrors the one-shared-reference-per-cycle production
-        # reality).
-        binance_reference_price=Decimal("100.05"),
     )
 
     assert result.final_recommendation_construction_result is not None

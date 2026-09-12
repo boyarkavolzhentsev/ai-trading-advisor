@@ -30,7 +30,6 @@ plain ``str`` beyond that line).
 from __future__ import annotations
 
 import os
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from pydantic import SecretStr, ValidationError
@@ -136,24 +135,6 @@ def _parse_path_env(name: str, *, default: str) -> Path:
     return Path(raw) if raw else Path(default)
 
 
-def _parse_positive_decimal_env(name: str) -> Decimal:
-    """Required, no default (mirrors ``_parse_positive_int_env``'s own
-    discipline) - used only for ``MAX_PRICE_BASIS_DIVERGENCE_PERCENT``
-    (corrective design closure, "PROVIDER SYMBOL SPLIT + PRICE-BASIS
-    RECONCILIATION"), a value this codebase deliberately never defaults or
-    guesses. Parsed as ``Decimal`` directly from the raw string - never via
-    ``float`` - consistent with every other Decimal-safe price/percent
-    computation in this repository."""
-    raw = _require_env(name)
-    try:
-        value = Decimal(raw)
-    except InvalidOperation:
-        raise BootstrapConfigurationError(f"Invalid value for environment variable: {name} (expected a positive decimal number)") from None
-    if value <= 0:
-        raise BootstrapConfigurationError(f"Invalid value for environment variable: {name} (expected a positive decimal number)")
-    return value
-
-
 def _build_mt5_credentials() -> MT5Credentials | None:
     """All three of ``MT5_LOGIN``/``MT5_PASSWORD``/``MT5_SERVER`` present ->
     explicit headless-login credentials. None present -> ``None`` (use
@@ -209,7 +190,6 @@ def build_production_advisory_config_from_env() -> ProductionAdvisoryConfig:
     logical_symbol = _require_env("ADVISORY_LOGICAL_SYMBOL")
     binance_symbol = _require_env("ADVISORY_BINANCE_SYMBOL")
     mt5_symbol = _require_env("ADVISORY_MT5_SYMBOL")
-    max_price_basis_divergence_percent = _parse_positive_decimal_env("MAX_PRICE_BASIS_DIVERGENCE_PERCENT")
     contract_type = _parse_enum_env("ADVISORY_CONTRACT_TYPE", ContractType)
     market = _parse_enum_env("ADVISORY_MARKET", MarketType)
     rollover_timezone = _require_env("MT5_ROLLOVER_TIMEZONE")
@@ -239,7 +219,6 @@ def build_production_advisory_config_from_env() -> ProductionAdvisoryConfig:
             # model's own defaults (None/None/()) apply; no on-chain scope
             # env var is introduced (see the approved design closure, "23.
             # OPTIONAL ON-CHAIN FIELDS").
-            max_price_basis_divergence_percent=max_price_basis_divergence_percent,
             rollover_policy=MT5RolloverPolicyConfig(rollover_timezone=rollover_timezone),
             # trading_cycle_config: omitted - ProductionAdvisoryConfig's own
             # field default (TradingCycleConfig()) is fully self-sufficient.

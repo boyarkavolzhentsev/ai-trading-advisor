@@ -24,9 +24,7 @@ from app.core.enums.setup_construction import SetupBlockReason, SetupConstructio
 from app.core.enums.strategy_router import StrategyFamily
 from app.orchestration.decision_risk_pipeline import evaluate_decision_risk_pipeline
 from tests.decision_risk_pipeline_support import (
-    BINANCE_REFERENCE_PRICE,
     BROKER_SYMBOL,
-    MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     NOW,
     blocked_assembly,
     context,
@@ -55,8 +53,6 @@ def test_happy_path_trend_following_completes() -> None:
         symbol_facts=symbol_facts(),
         m15_market_structure=trend_following_market_structure(),
         broker_symbol=BROKER_SYMBOL,
-        binance_reference_price=BINANCE_REFERENCE_PRICE,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=ready_assembly(),
         trading_cycle_config=default_config(),
     )
@@ -89,8 +85,6 @@ def test_blocked_assembly_stops_before_risk_and_preserves_reasons() -> None:
         symbol_facts=symbol_facts(),
         m15_market_structure=trend_following_market_structure(),
         broker_symbol=BROKER_SYMBOL,
-        binance_reference_price=BINANCE_REFERENCE_PRICE,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=assembly,
         trading_cycle_config=default_config(),
     )
@@ -119,8 +113,6 @@ def test_ready_assembly_account_snapshot_passed_unchanged_into_risk_gate() -> No
         symbol_facts=symbol_facts(),
         m15_market_structure=trend_following_market_structure(),
         broker_symbol=BROKER_SYMBOL,
-        binance_reference_price=BINANCE_REFERENCE_PRICE,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=assembly,
         trading_cycle_config=default_config(),
     )
@@ -142,8 +134,6 @@ def test_setup_bridge_preserves_exact_risk_per_unit_and_zero_sentinel_for_blocke
         symbol_facts=symbol_facts(),
         m15_market_structure=trend_following_market_structure(),
         broker_symbol=BROKER_SYMBOL,
-        binance_reference_price=BINANCE_REFERENCE_PRICE,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=ready_assembly(),
         trading_cycle_config=default_config(),
     )
@@ -179,8 +169,6 @@ def test_no_market_data_propagates_without_orchestrator_fabrication() -> None:
         symbol_facts=None,
         m15_market_structure=None,
         broker_symbol=BROKER_SYMBOL,
-        binance_reference_price=None,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=ready_assembly(),
         trading_cycle_config=default_config(),
     )
@@ -209,8 +197,6 @@ def test_policy_all_blocked_no_orchestrator_fabricated_candidate() -> None:
         symbol_facts=symbol_facts(),
         m15_market_structure=trend_following_market_structure(),
         broker_symbol=BROKER_SYMBOL,
-        binance_reference_price=BINANCE_REFERENCE_PRICE,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=ready_assembly(),
         trading_cycle_config=default_config(),
     )
@@ -241,8 +227,6 @@ def test_risk_blocked_propagates_to_portfolio_and_session() -> None:
         symbol_facts=symbol_facts(),
         m15_market_structure=trend_following_market_structure(),
         broker_symbol=BROKER_SYMBOL,
-        binance_reference_price=BINANCE_REFERENCE_PRICE,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=assembly,
         trading_cycle_config=default_config(),
     )
@@ -278,8 +262,6 @@ def test_portfolio_blocked_propagates_exact_result_to_session() -> None:
         symbol_facts=symbol_facts(),
         m15_market_structure=trend_following_market_structure(),
         broker_symbol=BROKER_SYMBOL,
-        binance_reference_price=BINANCE_REFERENCE_PRICE,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=assembly,
         trading_cycle_config=config,
     )
@@ -312,8 +294,6 @@ def test_session_locked_override_remains_completed_with_blocked_family() -> None
         symbol_facts=symbol_facts(),
         m15_market_structure=trend_following_market_structure(),
         broker_symbol=BROKER_SYMBOL,
-        binance_reference_price=BINANCE_REFERENCE_PRICE,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=ready_assembly(),
         trading_cycle_config=default_config(),
         locked_override=True,
@@ -347,8 +327,6 @@ def test_caller_supplied_evaluation_time_propagates_with_no_wall_clock_substitut
         symbol_facts=symbol_facts(),
         m15_market_structure=trend_following_market_structure(),
         broker_symbol=BROKER_SYMBOL,
-        binance_reference_price=BINANCE_REFERENCE_PRICE,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=assembly,
         trading_cycle_config=default_config(),
     )
@@ -375,8 +353,6 @@ def test_determinism_same_inputs_produce_equal_outputs() -> None:
         symbol_facts=symbol_facts(),
         m15_market_structure=trend_following_market_structure(),
         broker_symbol=BROKER_SYMBOL,
-        binance_reference_price=BINANCE_REFERENCE_PRICE,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=ready_assembly(),
         trading_cycle_config=default_config(),
     )

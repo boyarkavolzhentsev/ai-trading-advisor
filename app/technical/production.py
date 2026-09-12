@@ -46,7 +46,6 @@ conditions from genuine bugs.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal
 
 from app.core.enums.instrument import ContractType
 from app.core.enums.market import Timeframe
@@ -129,29 +128,14 @@ class TechnicalProductionResult:
     empty history rather than being omitted). Carries no raw per-timeframe
     snapshot and no trading decision field of any kind.
 
-    ``m15_last_closed_close`` (corrective design closure, "PROVIDER SYMBOL
-    SPLIT + PRICE-BASIS RECONCILIATION") is the M15 reference price Setup
-    Construction needs to translate a structural stop onto MT5's own price
-    axis - the retained M15 candle store's own most recent CLOSED candle
-    close, never the forming candle, never an extra fetch. Historically this
-    was always sourced from Binance (the ``m15_last_closed_close``/
-    ``binance_reference_price`` naming throughout this codebase reflects
-    that origin); as of the MT5 Price Authority Stage B production wiring,
-    this composer's configured provider is MT5-backed, so in production
-    this value is now an MT5 M15 close, not Binance's - the naming and the
-    cross-venue basis-divergence semantics built on top of it
-    (``app.decision.setup_construction``) are stale until Stage C's planned
-    cleanup. ``None`` only when zero M15 history has ever been retained (the
-    very first cycles). The caller (``ProductionAdvisoryComposer``) is
-    responsible for forcing this to ``None`` alongside
-    ``technical``/``m15_market_structure`` whenever the current cycle's own
-    Technical contour was safety-discarded for a fetch failure - this field
-    alone never distinguishes "fresh" from "stale-but-retained" for that
-    decision (see the composer's own discard policy)."""
+    Deliberately carries no standalone M15 reference-price field as of MT5
+    Price Authority Stage C: that field existed solely to bridge an M15
+    close into the now-fully-retired cross-venue price-basis reconciliation
+    layer (``app.decision.setup_construction``) - Setup Construction is now
+    MT5-native throughout and needs only ``m15_market_structure`` itself."""
 
     technical: TechnicalSupervisorResult
     m15_market_structure: MarketStructureFeatures
-    m15_last_closed_close: Decimal | None
     fetch_failures: tuple[TechnicalFetchFailure, ...]
 
 
@@ -179,8 +163,8 @@ class TechnicalProductionComposer:
     ) -> None:
         if Timeframe.M15 not in timeframes:
             raise ValueError(
-                "timeframes must include Timeframe.M15 - m15_market_structure/m15_last_closed_close "
-                "are required downstream by Setup Construction"
+                "timeframes must include Timeframe.M15 - m15_market_structure is required "
+                "downstream by Setup Construction"
             )
         self._config = config
         self._provider = provider
@@ -211,7 +195,6 @@ class TechnicalProductionComposer:
         results = []
         fetch_failures: list[TechnicalFetchFailure] = []
         m15_snapshot = None
-        m15_last_closed_close: Decimal | None = None
 
         for timeframe in self._timeframes:
             try:
@@ -236,14 +219,6 @@ class TechnicalProductionComposer:
             )
             if timeframe is Timeframe.M15:
                 m15_snapshot = snapshot
-                # Read AFTER record_candles above, so a successful fetch this
-                # cycle is reflected immediately - never the forming candle,
-                # never an extra REST call (the retained store already holds
-                # exactly what this cycle's own closed-candle processing just
-                # produced, or whatever was already retained on a fetch
-                # failure for this timeframe).
-                m15_retained = self._engine.history_for(symbol, contract_type, Timeframe.M15).candles.latest()
-                m15_last_closed_close = m15_retained[-1].close if m15_retained else None
 
             for analyst in _ANALYSTS:
                 results.append(analyst.analyze(snapshot))
@@ -254,7 +229,6 @@ class TechnicalProductionComposer:
         return TechnicalProductionResult(
             technical=technical,
             m15_market_structure=m15_snapshot.market_structure,
-            m15_last_closed_close=m15_last_closed_close,
             fetch_failures=tuple(fetch_failures),
         )
 

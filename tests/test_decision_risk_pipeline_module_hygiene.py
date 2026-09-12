@@ -107,8 +107,6 @@ def test_evaluate_decision_risk_pipeline_signature_takes_only_explicit_facts() -
         "symbol_facts",
         "m15_market_structure",
         "broker_symbol",
-        "binance_reference_price",
-        "max_price_basis_divergence_percent",
         "account_risk_snapshot_assembly",
         "trading_cycle_config",
         "locked_override",

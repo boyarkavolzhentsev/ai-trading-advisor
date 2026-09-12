@@ -1,11 +1,12 @@
 """``AdvisoryResponse``/``RecommendationDTO`` symbol semantics (corrective
 design closure, "PROVIDER SYMBOL SPLIT + PRICE-BASIS RECONCILIATION"):
 
-    AdvisoryResponse.symbol              = logical instrument   ("BTC")
-    AdvisoryResponse.market_data_symbol  = Binance symbol        ("BTCUSDT")
-    RecommendationDTO.symbol             = MT5 broker symbol     ("BTCUSDt")
+    AdvisoryResponse.symbol   = logical instrument   ("BTC")
+    RecommendationDTO.symbol  = MT5 broker symbol     ("BTCUSDt")
 
-Three genuinely distinct strings, proven never conflated.
+Two genuinely distinct strings, proven never conflated. (MT5 Price
+Authority Stage C removed ``AdvisoryResponse``'s sibling Binance-analytical-
+symbol field - see that model's own docstring for why.)
 """
 
 from __future__ import annotations
@@ -26,28 +27,14 @@ from tests.application_support import (
 )
 
 
-def test_advisory_response_logical_and_market_data_symbols_are_independent_and_distinct() -> None:
-    rcr = runtime_cycle_result(outcome=RuntimeCycleOutcome.READY)
-    cycle = production_advisory_cycle_result(rcr=rcr, outcome=ProductionAdvisoryCycleOutcome.READY)
-    # override the two cycle-level symbol facts directly, bypassing the
-    # shared fixture's single-SYMBOL convenience default:
-    cycle = cycle.model_copy(update={"symbol": "BTC", "market_data_symbol": "BTCUSDT"})
-
-    response = map_advisory_response("cyc-1", cycle)
-
-    assert response.symbol == "BTC"
-    assert response.market_data_symbol == "BTCUSDT"
-    assert response.symbol != response.market_data_symbol
-
-
-def test_recommendation_dto_symbol_is_mt5_broker_symbol_independent_of_cycle_level_symbols() -> None:
+def test_recommendation_dto_symbol_is_mt5_broker_symbol_independent_of_cycle_level_symbol() -> None:
     family = StrategyFamily.TREND_FOLLOWING
     trade_id = "cyc__TREND_FOLLOWING"
     mt5_symbol = "BTCUSDt"
 
     # build a real ACTIONABLE FinalRecommendation carrying the MT5 symbol -
-    # distinct from both the logical ("BTC") and Binance ("BTCUSDT") cycle-
-    # level symbols this same response will also carry.
+    # distinct from the logical ("BTC") cycle-level symbol this same
+    # response will also carry.
     drp, _ = one_family_actionable_others_ineligible(family, trade_id)
     final_result = final_family_result(family, trade_id=trade_id)
     recommendation = final_result.recommendation.model_copy(update={"symbol": mt5_symbol})
@@ -63,11 +50,10 @@ def test_recommendation_dto_symbol_is_mt5_broker_symbol_independent_of_cycle_lev
         new_tracking_persistence_outcomes=tracking,
     )
     cycle = production_advisory_cycle_result(rcr=rcr, outcome=ProductionAdvisoryCycleOutcome.READY)
-    cycle = cycle.model_copy(update={"symbol": "BTC", "market_data_symbol": "BTCUSDT"})
+    cycle = cycle.model_copy(update={"symbol": "BTC"})
 
     response = map_advisory_response("cyc-1", cycle)
 
     assert len(response.recommendations) == 1
     assert response.recommendations[0].symbol == mt5_symbol
     assert response.recommendations[0].symbol != response.symbol
-    assert response.recommendations[0].symbol != response.market_data_symbol

@@ -21,7 +21,6 @@ from app.orchestration.decision_risk_pipeline import evaluate_decision_risk_pipe
 from app.technical_supervisor.supervisor import TechnicalSupervisor
 from tests.decision_risk_pipeline_support import (
     BROKER_SYMBOL,
-    MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     NOW,
     blocked_assembly,
     context,
@@ -35,7 +34,6 @@ from tests.technical_supervisor_support import DEFAULT_TIMEFRAMES, analyzed_resu
 
 __all__ = [
     "BROKER_SYMBOL",
-    "MAX_PRICE_BASIS_DIVERGENCE_PERCENT",
     "NOW",
     "actionable_trend_market_structure",
     "blocked_assembly",
@@ -107,25 +105,14 @@ def run_pipeline(
     account_risk_snapshot_assembly=None,
     trading_cycle_config=None,
     evaluation_time=NOW,
-    binance_reference_price=Decimal("100.10"),
     symbol_facts_override=None,
 ) -> DecisionRiskPipelineResult:
-    """``binance_reference_price`` defaults to ``symbol_facts()``'s own
-    default ask - a no-op translation for every LONG-only scenario in this
-    module's own test suite. Callers exercising a SHORT family (or a mixed
-    LONG+SHORT contour) through this helper may override it explicitly if a
-    literal stop/risk value must match a specific direction's own entry
-    price exactly.
-
-    ``symbol_facts_override`` (corrective review, "MT5 BROKER STOP-LEVEL
+    """``symbol_facts_override`` (corrective review, "MT5 BROKER STOP-LEVEL
     SEMANTICS"): the default ``symbol_facts()`` fixture's 0.10-wide bid/ask
     spread is too wide for a mixed LONG+SHORT (``opposite_direction_*``)
     scenario to satisfy the real, bid/ask-based broker-minimum-stop check
-    for BOTH directions simultaneously from one shared Binance reference
-    price (the two directions' translated distances sum to a fixed 0.10,
-    but each individually needs to be >= the spread) - such callers must
-    supply a narrower-spread override explicitly; never widen it silently
-    here."""
+    for BOTH directions simultaneously - such callers must supply a
+    narrower-spread override explicitly; never widen it silently here."""
     return evaluate_decision_risk_pipeline(
         flow=flow,
         technical=technical,
@@ -135,8 +122,6 @@ def run_pipeline(
         symbol_facts=symbol_facts_override if symbol_facts_override is not None else symbol_facts(),
         m15_market_structure=m15_market_structure,
         broker_symbol=BROKER_SYMBOL,
-        binance_reference_price=binance_reference_price,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
         account_risk_snapshot_assembly=(
             account_risk_snapshot_assembly if account_risk_snapshot_assembly is not None else ready_assembly()
         ),

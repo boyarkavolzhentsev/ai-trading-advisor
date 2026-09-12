@@ -169,7 +169,7 @@ class RecommendationDTO(DomainModel):
     BASIS RECONCILIATION") is the MT5 broker-facing symbol (``SymbolMapping.
     mt5_symbol``, e.g. ``"BTCUSDt"``) - what the operator actually types into
     their broker for manual execution. Never the Binance/logical spelling -
-    see ``AdvisoryResponse.symbol``/``.market_data_symbol`` for those.
+    see ``AdvisoryResponse.symbol`` for the logical one.
     """
 
     trade_id: Annotated[str, Field(min_length=1)]
@@ -303,11 +303,13 @@ class AdvisoryResponse(DomainModel):
     ``symbol`` (corrective design closure, "PROVIDER SYMBOL SPLIT + PRICE-
     BASIS RECONCILIATION") is the operator-facing logical instrument
     identifier (``SymbolMapping.logical_symbol``, e.g. ``"BTC"``) - fed to no
-    provider, never the Binance or MT5 native spelling. ``market_data_symbol``
-    is the Binance symbol (``SymbolMapping.binance_symbol``, e.g.
-    ``"BTCUSDT"``) the analytical evidence actually came from - present even
-    when ``recommendations`` is empty. The MT5 broker-facing symbol (e.g.
-    ``"BTCUSDt"``) is never duplicated here: it lives on each
+    provider, never the Binance or MT5 native spelling - present even when
+    ``recommendations`` is empty. There is deliberately no second,
+    provider-native cycle-level symbol field here (MT5 Price Authority
+    Stage C removal): once Flow and Technical intentionally read from
+    different providers, no single such field could honestly describe "the"
+    analytical source any more. The MT5 broker-facing symbol (e.g.
+    ``"BTCUSDt"``) is never duplicated here either: it lives on each
     ``RecommendationDTO.symbol`` instead, since a cycle may legitimately
     carry zero recommendations. There is no caller-supplied symbol parameter
     anywhere in this package. ``recommendations`` and ``no_trade_reasons``
@@ -319,7 +321,6 @@ class AdvisoryResponse(DomainModel):
     logical_cycle_id: str
     as_of: Timestamp
     symbol: Symbol
-    market_data_symbol: Symbol
     status: ApplicationAdvisoryStatus
     recommendations: tuple[RecommendationDTO, ...]
     no_trade_reasons: tuple[NoTradeReasonDTO, ...]

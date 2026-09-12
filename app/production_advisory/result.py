@@ -64,20 +64,21 @@ class ProductionAdvisoryCycleResult(DomainModel):
     review), resolved here at the Stage0D layer only, without modifying
     the closed explanation domain.
 
-    ``symbol``/``market_data_symbol`` (corrective design closure, "PROVIDER
-    SYMBOL SPLIT + PRICE-BASIS RECONCILIATION"): ``symbol`` is the
-    operator-facing logical instrument identifier (``SymbolMapping.
-    logical_symbol``), fed to no provider; ``market_data_symbol`` is the
-    Binance symbol (``SymbolMapping.binance_symbol``) the analytical
-    evidence actually came from. Neither is the MT5 broker-facing symbol -
-    that lives only on each issued ``FinalRecommendation``/
-    ``RecommendationDTO``, since a cycle with zero recommendations has no
-    single broker symbol to report at this level.
+    ``symbol`` (corrective design closure, "PROVIDER SYMBOL SPLIT + PRICE-
+    BASIS RECONCILIATION") is the operator-facing logical instrument
+    identifier (``SymbolMapping.logical_symbol``), fed to no provider.
+    Deliberately no second, provider-native cycle-level symbol field here
+    (MT5 Price Authority Stage C removal): once Flow and Technical
+    intentionally read from different providers, no single such field could
+    honestly describe "the" analytical evidence source any more. The MT5
+    broker-facing symbol is never reported here either - it lives only on
+    each issued ``FinalRecommendation``/``RecommendationDTO``, since a cycle
+    with zero recommendations has no single broker symbol to report at this
+    level.
     """
 
     as_of: Timestamp
     symbol: Symbol
-    market_data_symbol: Symbol
     outcome: ProductionAdvisoryCycleOutcome
     runtime_cycle_result: RuntimeCycleResult
     explanation_result: ExplanationResult

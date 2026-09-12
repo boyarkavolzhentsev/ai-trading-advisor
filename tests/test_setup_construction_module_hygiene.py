@@ -99,8 +99,6 @@ def test_setup_construction_construct_signature_takes_only_explicit_facts() -> N
         "symbol_facts",
         "m15_market_structure",
         "broker_symbol",
-        "binance_reference_price",
-        "max_price_basis_divergence_percent",
     }
 
 

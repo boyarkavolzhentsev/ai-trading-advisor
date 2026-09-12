@@ -23,7 +23,7 @@ from app.core.config.mt5_rollover import MT5RolloverPolicyConfig
 from app.core.config.trading_cycle import TradingCycleConfig
 from app.core.enums.instrument import ContractType
 from app.core.enums.market import MarketType
-from app.core.models.base import DomainModel, Percent, Symbol
+from app.core.models.base import DomainModel, Symbol
 from app.core.models.economic_event import CurrencyCode
 from app.core.models.high_impact_event import HighImpactEventSymbolScopeConfig
 from app.core.models.instrument import Asset
@@ -74,18 +74,6 @@ class ProductionAdvisoryConfig(DomainModel):
     base_asset: Asset | None = None
     network: str | None = None
     currency_exposures: tuple[CurrencyCode, ...] = ()
-
-    max_price_basis_divergence_percent: Percent
-    """Required, no default (corrective design closure, "PROVIDER SYMBOL
-    SPLIT + PRICE-BASIS RECONCILIATION"): the maximum tolerated divergence
-    between the MT5 entry price and the Binance M15 reference price before
-    Setup Construction refuses to translate a structural stop onto MT5's
-    price axis (``SetupBlockReason.PRICE_BASIS_DIVERGENCE``). A wrong
-    default would silently mask a real, evolving venue basis - mirrors
-    ``MT5RolloverPolicyConfig.rollover_timezone``'s own "no default" rationale.
-    This is deliberately NOT chosen by this codebase: it must be set by the
-    operator from observed BTCUSDT/BTCUSDt basis behavior before any
-    ACTIONABLE-capable live run."""
 
     rollover_policy: MT5RolloverPolicyConfig
     trading_cycle_config: TradingCycleConfig = TradingCycleConfig()

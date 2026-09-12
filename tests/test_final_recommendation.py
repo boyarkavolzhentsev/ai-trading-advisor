@@ -65,12 +65,6 @@ def test_multiple_opposite_direction_actionable_families_coexist() -> None:
         technical=opposite_direction_technical(),
         flow=full_flow_result(),
         m15_market_structure=opposite_direction_market_structure(),
-        # opposite_direction_market_structure's own LONG stop (100) and SHORT
-        # stop (100.10) require a single shared Binance reference price
-        # strictly between them for BOTH directions' distance to translate
-        # positively (mirrors the one-shared-reference-per-cycle production
-        # reality - there is no per-direction reference in practice either).
-        binance_reference_price=Decimal("100.05"),
         # narrower bid/ask spread (0.02 vs the default 0.10) so the real,
         # bid/ask-based broker-minimum-stop check can pass for BOTH
         # directions simultaneously (see run_pipeline's own docstring).
@@ -93,6 +87,17 @@ def test_multiple_opposite_direction_actionable_families_coexist() -> None:
     assert breakout.recommendation.direction is TradeDirection.SHORT
     assert trend.recommendation.trade_id == "trade-long"
     assert breakout.recommendation.trade_id == "trade-short"
+
+    # MT5 Price Authority Stage C end-to-end proof: through the REAL Flow
+    # (Binance-backed context) + Technical (MT5-native market structure) +
+    # Decision/Risk Pipeline + Setup Construction + Final Recommendation
+    # chain, each stop_loss is the exact, unmodified MT5-native structural
+    # price from opposite_direction_market_structure() (LONG's own LOW
+    # swing at 100; SHORT's own broken HIGH swing at 100.10) - no
+    # cross-venue translation object or value entered this computation
+    # anywhere along the way.
+    assert trend.recommendation.stop_loss == Decimal("100")
+    assert breakout.recommendation.stop_loss == Decimal("100.10")
 
 
 # --- D: zero actionable families ---
@@ -170,12 +175,6 @@ def test_family_join_is_by_strategy_family_not_tuple_position() -> None:
         technical=opposite_direction_technical(),
         flow=full_flow_result(),
         m15_market_structure=opposite_direction_market_structure(),
-        # opposite_direction_market_structure's own LONG stop (100) and SHORT
-        # stop (100.10) require a single shared Binance reference price
-        # strictly between them for BOTH directions' distance to translate
-        # positively (mirrors the one-shared-reference-per-cycle production
-        # reality - there is no per-direction reference in practice either).
-        binance_reference_price=Decimal("100.05"),
         # narrower bid/ask spread (0.02 vs the default 0.10) so the real,
         # bid/ask-based broker-minimum-stop check can pass for BOTH
         # directions simultaneously (see run_pipeline's own docstring).

@@ -136,8 +136,6 @@ def constructed_setup_result(*, context: MarketEvaluationContext, as_of: datetim
         symbol_facts=facts,
         m15_market_structure=ms,
         broker_symbol=context.symbol,
-        binance_reference_price=Decimal("110"),
-        max_price_basis_divergence_percent=Decimal("100"),
     )
 
 
@@ -162,8 +160,6 @@ def constructed_setup_result_with_event_driven_blocked(*, context: MarketEvaluat
         symbol_facts=facts,
         m15_market_structure=ms,
         broker_symbol=context.symbol,
-        binance_reference_price=Decimal("110"),
-        max_price_basis_divergence_percent=Decimal("100"),
     )
 
 

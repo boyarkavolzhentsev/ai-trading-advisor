@@ -27,10 +27,6 @@ def test_single_authoritative_symbol_mapping_is_required() -> None:
     assert config.symbol_mapping.mt5_symbol == "BTCUSDt"
 
 
-def test_max_price_basis_divergence_percent_is_required() -> None:
-    assert ProductionAdvisoryConfig.model_fields["max_price_basis_divergence_percent"].is_required()
-
-
 def test_calendar_staleness_threshold_defaults_to_fifteen_minutes() -> None:
     config = build_config()
     assert config.calendar_staleness_threshold == timedelta(minutes=15)
@@ -87,4 +83,4 @@ def test_llm_enabled_with_config_accepted() -> None:
 def test_config_is_frozen() -> None:
     config = build_config()
     with pytest.raises(ValidationError):
-        config.max_price_basis_divergence_percent = 999  # type: ignore[misc]
+        config.market = 999  # type: ignore[misc]

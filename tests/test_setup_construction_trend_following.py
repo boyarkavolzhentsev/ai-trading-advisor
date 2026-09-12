@@ -15,9 +15,7 @@ from app.core.enums.trade import TradeDirection
 from app.decision.setup_construction import SetupConstruction
 from tests.setup_construction_support import (
     AS_OF,
-    MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     SYMBOL,
-    reference_price_for,
     result_for,
     swing,
     symbol_facts,
@@ -26,7 +24,7 @@ from tests.setup_construction_support import (
 )
 
 
-def _construct(policy_result, *, market_structure, facts=None, direction=TradeDirection.LONG):
+def _construct(policy_result, *, market_structure, facts=None):
     facts = facts if facts is not None else symbol_facts()
     return SetupConstruction().construct(
         strategy_policy_result=policy_result,
@@ -34,8 +32,6 @@ def _construct(policy_result, *, market_structure, facts=None, direction=TradeDi
         symbol_facts=facts,
         m15_market_structure=market_structure,
         broker_symbol=SYMBOL,
-        binance_reference_price=reference_price_for(direction, facts),
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
 
 
@@ -62,7 +58,7 @@ def test_short_uses_latest_high_swing_by_candle_time() -> None:
     facts = symbol_facts(ask=Decimal("100.5"), bid=Decimal("100"))
 
     result = result_for(
-        _construct(policy, market_structure=ms, facts=facts, direction=TradeDirection.SHORT), StrategyFamily.TREND_FOLLOWING
+        _construct(policy, market_structure=ms, facts=facts), StrategyFamily.TREND_FOLLOWING
     )
 
     assert result.outcome is SetupConstructionOutcome.CONSTRUCTED

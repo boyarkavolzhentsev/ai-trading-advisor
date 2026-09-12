@@ -102,7 +102,6 @@ def build_advisory_response(
         logical_cycle_id=logical_cycle_id,
         as_of=AS_OF,
         symbol="EURUSD",
-        market_data_symbol="EURUSD",
         status=status,
         recommendations=recommendations,
         no_trade_reasons=no_trade_reasons,

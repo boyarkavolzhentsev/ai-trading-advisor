@@ -8,7 +8,6 @@ MT5, or the network.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
@@ -41,7 +40,6 @@ def build_config(**overrides: object) -> ProductionAdvisoryConfig:
         "symbol_mapping": SymbolMapping(logical_symbol="EURUSD", binance_symbol="EURUSD", mt5_symbol="EURUSD"),
         "contract_type": ContractType.PERPETUAL,
         "market": MarketType.FX,
-        "max_price_basis_divergence_percent": Decimal("100"),
         "rollover_policy": MT5RolloverPolicyConfig(rollover_timezone="UTC"),
         "rollover_state_path": Path("rollover_state.json"),
         "tracking_directory": Path("tracking"),
@@ -95,14 +93,8 @@ class FakeTechnicalComposer:
     """Returns a caller-configured ``fetch_failures`` tuple; records every
     ``as_of`` it was called with."""
 
-    def __init__(
-        self,
-        fetch_failures: tuple[TechnicalFetchFailure, ...] = (),
-        *,
-        m15_last_closed_close: Decimal | None = Decimal("100"),
-    ) -> None:
+    def __init__(self, fetch_failures: tuple[TechnicalFetchFailure, ...] = ()) -> None:
         self.fetch_failures = fetch_failures
-        self.m15_last_closed_close = m15_last_closed_close
         self.build_calls: list[object] = []
         self.sentinel_technical = object()
         self.sentinel_m15 = object()
@@ -112,7 +104,6 @@ class FakeTechnicalComposer:
         return TechnicalProductionResult(
             technical=self.sentinel_technical,  # type: ignore[arg-type]
             m15_market_structure=self.sentinel_m15,  # type: ignore[arg-type]
-            m15_last_closed_close=self.m15_last_closed_close,
             fetch_failures=self.fetch_failures,
         )
 

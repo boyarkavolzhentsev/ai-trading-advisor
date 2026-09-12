@@ -23,7 +23,6 @@ _MINIMAL_ENV = {
     "ADVISORY_LOGICAL_SYMBOL": "EURUSD",
     "ADVISORY_BINANCE_SYMBOL": "EURUSD",
     "ADVISORY_MT5_SYMBOL": "EURUSD",
-    "MAX_PRICE_BASIS_DIVERGENCE_PERCENT": "100",
     "ADVISORY_CONTRACT_TYPE": "PERPETUAL",
     "ADVISORY_MARKET": "FX",
     "MT5_ROLLOVER_TIMEZONE": "UTC",
@@ -37,7 +36,6 @@ def _set_minimal_env(monkeypatch: pytest.MonkeyPatch, **overrides: str | None) -
         "ADVISORY_LOGICAL_SYMBOL",
         "ADVISORY_BINANCE_SYMBOL",
         "ADVISORY_MT5_SYMBOL",
-        "MAX_PRICE_BASIS_DIVERGENCE_PERCENT",
         "ADVISORY_CONTRACT_TYPE",
         "ADVISORY_MARKET",
         "MT5_ROLLOVER_TIMEZONE",
@@ -71,7 +69,6 @@ def test_minimal_required_env_builds_valid_config(monkeypatch: pytest.MonkeyPatc
     assert config.symbol_mapping.logical_symbol == "EURUSD"
     assert config.symbol_mapping.binance_symbol == "EURUSD"
     assert config.symbol_mapping.mt5_symbol == "EURUSD"
-    assert config.max_price_basis_divergence_percent == 100
     assert config.contract_type is ContractType.PERPETUAL
     assert config.market is MarketType.FX
     assert config.rollover_policy.rollover_timezone == "UTC"
@@ -231,16 +228,15 @@ def test_missing_required_var_message_names_the_variable(monkeypatch: pytest.Mon
         build_production_advisory_config_from_env()
 
 
-def test_missing_max_price_basis_divergence_percent_fails_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_max_price_basis_divergence_percent_env_var_no_longer_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MT5 Price Authority Stage C: the cross-venue price-basis
+    reconciliation layer is fully retired, so ``MAX_PRICE_BASIS_DIVERGENCE_PERCENT``
+    is no longer read at all - config construction must succeed from the
+    minimal env even when that variable (and any stray value for it) is
+    absent, and no replacement threshold is introduced."""
     _set_minimal_env(monkeypatch, MAX_PRICE_BASIS_DIVERGENCE_PERCENT=None)
-    with pytest.raises(BootstrapConfigurationError, match="MAX_PRICE_BASIS_DIVERGENCE_PERCENT"):
-        build_production_advisory_config_from_env()
-
-
-def test_invalid_max_price_basis_divergence_percent_fails_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:
-    _set_minimal_env(monkeypatch, MAX_PRICE_BASIS_DIVERGENCE_PERCENT="not-a-number")
-    with pytest.raises(BootstrapConfigurationError, match="MAX_PRICE_BASIS_DIVERGENCE_PERCENT"):
-        build_production_advisory_config_from_env()
+    config = build_production_advisory_config_from_env()
+    assert not hasattr(config, "max_price_basis_divergence_percent")
 
 
 # --- service construction / hygiene ----------------------------------------

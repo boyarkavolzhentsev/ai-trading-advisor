@@ -15,7 +15,6 @@ from app.risk.engine import RiskGate
 from tests.risk_gate_support import default_account_snapshot, default_config
 from tests.setup_construction_support import (
     AS_OF,
-    MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     SYMBOL,
     result_for,
     swing,
@@ -23,12 +22,6 @@ from tests.setup_construction_support import (
     trend_following_policy_result,
     usable_market_structure,
 )
-
-_REFERENCE_PRICE = Decimal("100")
-"""Arbitrary valid placeholder for the two BLOCKED-setup tests below, which
-supply symbol_facts=None - Setup Construction blocks on _symbol_facts_usable
-before binance_reference_price is ever consulted, so its exact value is
-immaterial there."""
 
 
 def test_constructed_setup_bridges_exact_risk_per_unit() -> None:
@@ -41,8 +34,6 @@ def test_constructed_setup_bridges_exact_risk_per_unit() -> None:
         symbol_facts=facts,
         m15_market_structure=ms,
         broker_symbol=SYMBOL,
-        binance_reference_price=facts.ask,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
     setup = result_for(setup_result, StrategyFamily.TREND_FOLLOWING)
 
@@ -60,8 +51,6 @@ def test_blocked_setup_bridges_zero_sentinel() -> None:
         symbol_facts=symbol_facts(),
         m15_market_structure=None,
         broker_symbol=SYMBOL,
-        binance_reference_price=_REFERENCE_PRICE,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
     setup = result_for(setup_result, StrategyFamily.TREND_FOLLOWING)
     assert setup.reasons == (SetupBlockReason.SHARED_FACT_UNAVAILABLE,)
@@ -79,8 +68,6 @@ def test_exactly_one_candidate_risk_input_per_policy_eligible_family() -> None:
         symbol_facts=None,
         m15_market_structure=None,
         broker_symbol=SYMBOL,
-        binance_reference_price=_REFERENCE_PRICE,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
 
     candidates = to_candidate_risk_inputs(setup_result)
@@ -101,8 +88,6 @@ def test_risk_gate_accepts_bridge_output_without_modification() -> None:
         symbol_facts=facts,
         m15_market_structure=ms,
         broker_symbol=SYMBOL,
-        binance_reference_price=facts.ask,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
 
     candidates = to_candidate_risk_inputs(setup_result)
@@ -125,8 +110,6 @@ def test_blocked_setup_reaches_existing_zero_or_negative_risk_per_unit_behavior(
         symbol_facts=None,
         m15_market_structure=None,
         broker_symbol=SYMBOL,
-        binance_reference_price=_REFERENCE_PRICE,
-        max_price_basis_divergence_percent=MAX_PRICE_BASIS_DIVERGENCE_PERCENT,
     )
     setup = result_for(setup_result, StrategyFamily.TREND_FOLLOWING)
     assert setup.reasons == (SetupBlockReason.SHARED_FACT_UNAVAILABLE,)  # the true reason, retained on StrategySetupResult

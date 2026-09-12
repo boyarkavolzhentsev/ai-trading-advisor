@@ -51,7 +51,6 @@ via an invented block reason.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from decimal import Decimal
 
 from app.core.config.mt5_rollover import MT5RolloverPolicyConfig
 from app.core.config.trading_cycle import TradingCycleConfig
@@ -265,8 +264,6 @@ def run_runtime_cycle(
     trade_ids: Mapping[StrategyFamily, str],
     context: MarketEvaluationContext,
     mt5_symbol: Symbol,
-    binance_reference_price: Decimal | None,
-    max_price_basis_divergence_percent: Decimal,
     flow: FlowSupervisorResult | None = None,
     technical: TechnicalSupervisorResult | None = None,
     external: ExternalIntelligenceSupervisorResult | None = None,
@@ -311,11 +308,13 @@ def run_runtime_cycle(
     PRICE-BASIS RECONCILIATION") is the broker-facing symbol every MT5 read
     (``symbol_facts``), the netting guard, and Setup Construction's
     broker-facing identity use - deliberately distinct from ``context.symbol``,
-    which remains the Binance analytical identity Flow/Technical/Market
-    Evaluation were already keyed by. ``binance_reference_price``/
-    ``max_price_basis_divergence_percent`` are threaded unchanged into Setup
-    Construction (via the Decision/Risk Pipeline) - this coordinator never
-    computes or interprets either itself.
+    which remains the Binance analytical identity Flow/Market Evaluation are
+    keyed by. MT5 Price Authority Stage C retired the cross-venue price-basis
+    reconciliation layer entirely (Technical/Setup Construction are now fully
+    MT5-native - see ``app.decision.setup_construction``'s own docstring) -
+    this coordinator never carried that logic itself and needed no change
+    beyond no longer threading its two now-removed operator-configured
+    values through to Setup Construction (via the Decision/Risk Pipeline).
     """
     if runtime_status.state is not MT5ConnectivityState.AVAILABLE:
         return RuntimeCycleResult(as_of=as_of, outcome=RuntimeCycleOutcome.BLOCKED, mt5_runtime_status=runtime_status)
@@ -429,8 +428,6 @@ def run_runtime_cycle(
             symbol_facts=symbol_facts_by_symbol.get(target_symbol),
             m15_market_structure=m15_market_structure,
             broker_symbol=mt5_symbol,
-            binance_reference_price=binance_reference_price,
-            max_price_basis_divergence_percent=max_price_basis_divergence_percent,
             account_risk_snapshot_assembly=account_risk_snapshot_assembly,
             trading_cycle_config=trading_cycle_config,
             locked_override=locked_override,
