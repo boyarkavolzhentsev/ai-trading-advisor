@@ -27,6 +27,7 @@ __all__ = [
     "FakeMT5Client",
     "FakeRawMT5Module",
     "default_account_info",
+    "default_raw_rate",
     "default_terminal_info",
 ]
 
@@ -62,6 +63,32 @@ def default_account_info(
         margin_mode=margin_mode,
         profit=profit,
     )
+
+
+def default_raw_rate(
+    *,
+    time: int,
+    open: float = 100.0,
+    high: float = 101.0,
+    low: float = 99.0,
+    close: float = 100.5,
+    tick_volume: int = 500,
+    spread: int = 2,
+    real_volume: int = 0,
+) -> dict[str, Any]:
+    """One raw ``copy_rates_from_pos`` row - a plain ``dict``, matching how
+    the real ``MetaTrader5`` package's numpy structured-array rows are
+    documented to be accessed (``row["time"]``, never ``row.time``)."""
+    return {
+        "time": time,
+        "open": open,
+        "high": high,
+        "low": low,
+        "close": close,
+        "tick_volume": tick_volume,
+        "spread": spread,
+        "real_volume": real_volume,
+    }
 
 
 class FakeRawMT5Module:
@@ -110,6 +137,11 @@ class FakeRawMT5Module:
     DEAL_ENTRY_INOUT = 2
     DEAL_ENTRY_OUT_BY = 3
 
+    TIMEFRAME_M1 = 1
+    TIMEFRAME_M5 = 5
+    TIMEFRAME_M15 = 15
+    TIMEFRAME_H1 = 16385
+
     _UNSET: Any = object()
 
     def __init__(
@@ -123,6 +155,7 @@ class FakeRawMT5Module:
         symbol_info_result: SimpleNamespace | None = None,
         symbol_tick_result: SimpleNamespace | None = None,
         history_deals_result: tuple[SimpleNamespace, ...] | None = (),
+        rates_result: tuple[dict[str, Any], ...] | None = (),
     ) -> None:
         self._initialize_result = initialize_result
         self._terminal_info = default_terminal_info() if terminal_info is self._UNSET else terminal_info
@@ -132,11 +165,13 @@ class FakeRawMT5Module:
         self._symbol_info_result = symbol_info_result
         self._symbol_tick_result = symbol_tick_result
         self._history_deals_result = history_deals_result
+        self._rates_result = rates_result
         self.initialize_calls: list[dict[str, Any]] = []
         self.shutdown_calls = 0
         self.symbol_info_calls: list[str] = []
         self.symbol_info_tick_calls: list[str] = []
         self.history_deals_get_calls: list[tuple[Any, Any]] = []
+        self.copy_rates_from_pos_calls: list[tuple[Any, Any, Any, Any]] = []
 
     def initialize(self, **kwargs: Any) -> bool:
         self.initialize_calls.append(kwargs)
@@ -162,6 +197,12 @@ class FakeRawMT5Module:
     def history_deals_get(self, date_from: Any, date_to: Any) -> tuple[SimpleNamespace, ...] | None:
         self.history_deals_get_calls.append((date_from, date_to))
         return self._history_deals_result
+
+    def copy_rates_from_pos(
+        self, symbol: str, timeframe: Any, start_pos: Any, count: Any
+    ) -> tuple[dict[str, Any], ...] | None:
+        self.copy_rates_from_pos_calls.append((symbol, timeframe, start_pos, count))
+        return self._rates_result
 
     def shutdown(self) -> None:
         self.shutdown_calls += 1

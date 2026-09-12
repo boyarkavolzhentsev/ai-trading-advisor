@@ -22,7 +22,7 @@ from app.market_data.exceptions import (
     UnknownSymbolError,
     UnsupportedTimeframeError,
 )
-from app.market_data.protocols import FuturesMarketDataProvider
+from app.market_data.protocols import FuturesMarketDataProvider, OHLCVProvider
 from app.market_data.providers.binance.client import BinanceRestClient
 from app.market_data.providers.binance.futures import BinanceFuturesMarketDataProvider
 from app.market_data.providers.binance.futures.constants import (
@@ -82,6 +82,16 @@ def _provider(
 def test_provider_satisfies_the_protocol(now: datetime) -> None:
     provider = _provider({}, now)
     assert isinstance(provider, FuturesMarketDataProvider)
+
+
+def test_provider_satisfies_ohlcv_provider(now: datetime) -> None:
+    """MT5 Price Authority Stage A contract correction: ``OHLCVProvider.
+    get_ohlcv`` gained an ``as_of`` keyword - the existing, unmodified
+    Binance Futures provider must still satisfy the protocol (Python
+    protocols are structural; an extra keyword-only parameter never affects
+    isinstance conformance)."""
+    provider = _provider({}, now)
+    assert isinstance(provider, OHLCVProvider)
 
 
 # --------------------------------------------------------------------------- #
@@ -269,6 +279,33 @@ def test_get_ohlcv_requests_correct_endpoint_symbol_interval_and_limit(now: date
     assert seen["symbol"] == "BTCUSDT"
     assert seen["interval"] == "5m"
     assert seen["limit"] == "1"
+
+
+def test_get_ohlcv_accepts_as_of_without_changing_output_or_fetch_semantics(now: datetime) -> None:
+    """MT5 Price Authority Stage A contract correction: a provider-agnostic
+    caller may always pass ``as_of=cycle_as_of`` per the ``OHLCVProvider``
+    contract. Binance ignores it - same endpoint, same params, same mapped
+    output, whether or not it is supplied."""
+    seen_without: dict[str, str] = {}
+    seen_with: dict[str, str] = {}
+
+    def handler_without(request: httpx.Request) -> httpx.Response:
+        seen_without["path"] = request.url.path
+        seen_without.update(dict(request.url.params))
+        return httpx.Response(200, json=[_futures_kline_row(now)])
+
+    def handler_with(request: httpx.Request) -> httpx.Response:
+        seen_with["path"] = request.url.path
+        seen_with.update(dict(request.url.params))
+        return httpx.Response(200, json=[_futures_kline_row(now)])
+
+    candles_without = _provider(handler_without, now).get_ohlcv("BTCUSDT", Timeframe.M5, limit=1)
+    candles_with = _provider(handler_with, now).get_ohlcv(
+        "BTCUSDT", Timeframe.M5, limit=1, as_of=now + timedelta(hours=999)
+    )
+
+    assert seen_with == seen_without  # identical endpoint/symbol/interval/limit regardless of as_of
+    assert candles_with == candles_without  # identical mapped output regardless of as_of
 
 
 def test_get_ohlcv_maps_to_existing_ohlcv_candle(now: datetime) -> None:

@@ -21,6 +21,7 @@ from types import TracebackType
 from typing import Self
 
 from app.core.enums.market import Timeframe
+from app.core.models.base import Timestamp
 from app.core.models.candle import OHLCVCandle
 from app.core.models.data_quality import DataQuality
 from app.core.models.funding import FundingRate
@@ -152,6 +153,8 @@ class BinanceFuturesMarketDataProvider:
         symbol: str,
         timeframe: Timeframe,
         limit: int = DEFAULT_OHLCV_LIMIT,
+        *,
+        as_of: Timestamp | None = None,
     ) -> list[OHLCVCandle]:
         """Return up to ``limit`` closed-or-forming candles, oldest first.
 
@@ -160,6 +163,12 @@ class BinanceFuturesMarketDataProvider:
         ``app.technical.alignment.split_closed_and_forming``) owns that
         decision. USD-M perpetual futures only, over the same ``/klines``
         endpoint ``get_taker_flow`` already uses - left completely untouched.
+
+        ``as_of`` (``OHLCVProvider`` contract, MT5 Price Authority Stage A):
+        accepted for provider-agnostic call-site compatibility, deliberately
+        ignored - native Binance klines are fetched by ``limit`` alone and
+        never need a caller-supplied observation time to decide what to
+        return. No fetch/endpoint/output behavior changes based on it.
         """
         requested = mapper.normalize_symbol(symbol)
         interval = mapper.to_futures_interval(timeframe)

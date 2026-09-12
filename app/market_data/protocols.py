@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from app.core.enums.market import Timeframe
+from app.core.models.base import Timestamp
 from app.core.models.candle import OHLCVCandle
 from app.core.models.funding import FundingRate
 from app.core.models.instrument import InstrumentMetadata
@@ -101,6 +102,44 @@ class FuturesMarketDataProvider(Protocol):
 
 
 @runtime_checkable
+class OHLCVProvider(Protocol):
+    """Read-only OHLCV-only market data source for one venue/timeframe set.
+
+    The narrowest honest contract a Technical-only consumer needs (MT5 Price
+    Authority migration): ``MarketDataProvider``/``FuturesMarketDataProvider``
+    each carry unrelated capabilities (current price, bid/ask, instrument
+    metadata, funding rate, open interest, taker flow, order book) that a
+    Technical-only provider would otherwise have to fake or stub.
+
+    ``as_of`` (Stage A contract-completion corrective review): the
+    authoritative observation/cycle time, supplied by the caller - never
+    substituted by any provider's own independently-sampled wall clock. A
+    native-timeframe provider (e.g. Binance, which returns raw klines
+    unfiltered and lets its own caller decide closed-vs-forming) may freely
+    IGNORE it; a provider that must derive a timeframe internally (e.g. MT5
+    synthesizing H4 from H1 and needing to know which H1 bars are already
+    closed) MAY require it and fail deterministically without it. Either way,
+    every ``OHLCVProvider`` implementation accepts the keyword - a
+    provider-agnostic caller may always pass ``as_of=cycle_as_of`` without
+    risking a ``TypeError``, and no implementation may read
+    ``datetime.now()`` in its place. One honest contract for every provider,
+    not a second cycle-aware protocol: both existing Binance providers and
+    the MT5 provider satisfy this identical shape.
+    """
+
+    def get_ohlcv(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        limit: int = DEFAULT_OHLCV_LIMIT,
+        *,
+        as_of: Timestamp | None = None,
+    ) -> list[OHLCVCandle]:
+        """Return up to ``limit`` most recent candles, oldest first."""
+        ...
+
+
+@runtime_checkable
 class LiquidationProvider(Protocol):
     """Read-only source of recent forced-liquidation events for one venue."""
 
@@ -120,4 +159,5 @@ __all__ = [
     "FuturesMarketDataProvider",
     "LiquidationProvider",
     "MarketDataProvider",
+    "OHLCVProvider",
 ]

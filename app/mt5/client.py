@@ -25,8 +25,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
+from app.core.enums.market import Timeframe
 from app.core.enums.mt5_history import MT5DealEntry, MT5DealType
 from app.core.enums.mt5_runtime import AccountPositionMode, MT5ConnectivityState
 from app.core.enums.mt5_symbol import MT5SymbolTradeMode
@@ -34,11 +35,32 @@ from app.core.enums.order import OrderSide
 from app.core.models.base import Timestamp
 from app.core.models.mt5_history import MT5Deal
 from app.core.models.mt5_position import MT5Position
+from app.core.models.mt5_rate import MT5RawRate
 from app.core.models.mt5_runtime import MT5AccountFacts, MT5Credentials, MT5RuntimeStatus
 from app.core.models.mt5_symbol import MT5SymbolFacts
 from app.mt5.errors import MT5NotInitializedError
 from app.mt5.history import MT5HistoryReadStatus
 from app.mt5.risk import MT5PositionsReadStatus
+
+MT5RatesReadStatus = Literal["OK", "UNAVAILABLE"]
+"""What ``MT5Client.rates()`` observed. Defined here (not a separate pure
+module, unlike ``MT5HistoryReadStatus``/``MT5PositionsReadStatus``) because
+``copy_rates_from_pos`` returns one homogeneous, already-typed array - there
+is no per-row normalization step that can fail independently of the whole
+read the way one malformed deal timestamp can, so no third ``"MALFORMED_*"``
+state is needed."""
+
+_RATES_TIMEFRAME_MT5_ATTRS: dict[Timeframe, str] = {
+    Timeframe.M1: "TIMEFRAME_M1",
+    Timeframe.M5: "TIMEFRAME_M5",
+    Timeframe.M15: "TIMEFRAME_M15",
+    Timeframe.H1: "TIMEFRAME_H1",
+}
+"""MT5 Price Authority Stage A: only the timeframes MT5 provides directly
+(H4/D1 are derived elsewhere, never read raw from MT5 in V1). Requesting any
+other ``Timeframe`` is a caller-contract violation, not a legitimate broker
+condition - ``rates()`` raises ``ValueError`` for it, mirroring
+``MT5NotInitializedError``'s own not-a-broker-condition precedent."""
 
 
 def _stringify_last_error(mt5_module: Any) -> str | None:
@@ -355,6 +377,44 @@ class MT5Client:
                 )
             )
         return "OK", tuple(normalized)
+
+    def rates(self, *, symbol: str, timeframe: Timeframe, count: int) -> tuple[MT5RatesReadStatus, tuple[MT5RawRate, ...]]:
+        """Read-only ``copy_rates_from_pos(symbol, mt5_timeframe, 0, count)``
+        - the ``count`` most recent bars, oldest first (MT5's own ordering,
+        never re-sorted here). Returns raw, un-normalized bars: no UTC
+        timestamp conversion, no OHLC validation - see ``MT5RawRate``'s own
+        docstring for why that is deliberately not this method's job."""
+        if not self._initialized or self._mt5 is None:
+            raise MT5NotInitializedError("rates() called before a successful initialize()")
+
+        attr_name = _RATES_TIMEFRAME_MT5_ATTRS.get(timeframe)
+        if attr_name is None:
+            raise ValueError(f"rates() does not support timeframe {timeframe!r}")
+        mt5_timeframe = getattr(self._mt5, attr_name)
+
+        status = self._current_status()
+        if status.state is not MT5ConnectivityState.AVAILABLE:
+            return "UNAVAILABLE", ()
+
+        raw_rates = self._mt5.copy_rates_from_pos(symbol, mt5_timeframe, 0, count)
+        if raw_rates is None:
+            return "UNAVAILABLE", ()
+        if len(raw_rates) == 0:
+            return "OK", ()
+
+        normalized = tuple(
+            MT5RawRate(
+                epoch_seconds=int(raw_rate["time"]),
+                open=Decimal(str(raw_rate["open"])),
+                high=Decimal(str(raw_rate["high"])),
+                low=Decimal(str(raw_rate["low"])),
+                close=Decimal(str(raw_rate["close"])),
+                tick_volume=int(raw_rate["tick_volume"]),
+                real_volume=int(raw_rate["real_volume"]),
+            )
+            for raw_rate in raw_rates
+        )
+        return "OK", normalized
 
     def shutdown(self) -> None:
         if self._mt5 is not None:

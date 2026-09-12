@@ -74,6 +74,7 @@ from app.core.config.high_impact_event_bridge import HighImpactEventCalendarTime
 from app.core.enums.high_impact_event import HighImpactEventDataQuality, HighImpactEventImportance
 from app.core.models.base import Timestamp
 from app.core.models.high_impact_event import HighImpactEventContext, HighImpactEventRecord
+from app.core.time_normalization import resolve_unambiguous_utc
 
 _SUPPORTED_SCHEMA_VERSION = 2
 _DEFAULT_PRODUCER_FALLBACK = "mt5_calendar_bridge"
@@ -101,47 +102,20 @@ def _parse_naive_server_timestamp(raw: object) -> datetime:
     return parsed
 
 
-def _resolve_unambiguous_utc(naive_server_time: datetime, zone: ZoneInfo) -> Timestamp:
-    """Deterministic, fold-aware validation of one naive server-local
-    instant - never silently picks ``fold=0``/``fold=1`` (never uses
-    ``observed_offset_seconds`` to choose either, which stays audit-only).
-
-    Compares both PEP 495 fold interpretations of the same naive value:
-
-    - identical UTC offset under both folds -> an ordinary, unambiguous
-      instant; convert normally.
-    - differing offsets -> either a spring-forward gap (this local wall
-      time never occurs) or a fall-back fold (it occurs twice, at two
-      different UTC instants) - distinguished by round-tripping each
-      candidate UTC instant back through the same zone: an occurring
-      instant round-trips to the original naive value, a gap instant
-      round-trips to neither fold. Either way this is rejected - never
-      fabricated - by raising ``ValueError``, which ``_parse_event``'s
-      caller already treats as a whole-file ``MALFORMED`` result.
-    """
-    fold_0 = naive_server_time.replace(tzinfo=zone, fold=0)
-    fold_1 = naive_server_time.replace(tzinfo=zone, fold=1)
-
-    if fold_0.utcoffset() == fold_1.utcoffset():
-        return fold_0.astimezone(ZoneInfo("UTC"))
-
-    utc_0 = fold_0.astimezone(ZoneInfo("UTC"))
-    utc_1 = fold_1.astimezone(ZoneInfo("UTC"))
-    round_trips_0 = utc_0.astimezone(zone).replace(tzinfo=None) == naive_server_time
-    round_trips_1 = utc_1.astimezone(zone).replace(tzinfo=None) == naive_server_time
-
-    if round_trips_0 and round_trips_1:
-        raise ValueError("event_time_server is ambiguous under server_timezone (DST fall-back fold) - refusing to guess")
-    raise ValueError("event_time_server does not exist under server_timezone (DST spring-forward gap)")
-
-
 def _convert_server_time_to_utc(naive_server_time: datetime, timezone_config: HighImpactEventCalendarTimezoneConfig) -> Timestamp:
     """The one place a real conversion happens - DST-safe for arbitrary
     future dates because ``zoneinfo`` carries the configured IANA zone's own
     forward-published transition schedule (unlike any MQL5-side offset
-    arithmetic, which only ever knows the offset valid *right now*)."""
+    arithmetic, which only ever knows the offset valid *right now*).
+
+    Delegates the actual fold-aware conversion to the shared, generalized
+    ``app.core.time_normalization.resolve_unambiguous_utc`` (never uses
+    ``observed_offset_seconds`` to choose a fold, which stays audit-only); a
+    ``ValueError`` from it (spring-forward gap or fall-back fold) propagates
+    to ``_parse_event``'s caller, which already treats it as a whole-file
+    ``MALFORMED`` result."""
     zone = ZoneInfo(timezone_config.server_timezone)
-    return _resolve_unambiguous_utc(naive_server_time, zone)
+    return resolve_unambiguous_utc(naive_server_time, zone)
 
 
 def _parse_event(raw: object, *, timezone_config: HighImpactEventCalendarTimezoneConfig) -> HighImpactEventRecord:
