@@ -30,6 +30,7 @@ plain ``str`` beyond that line).
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import SecretStr, ValidationError
@@ -244,6 +245,39 @@ def build_production_advisory_config_from_env() -> ProductionAdvisoryConfig:
         raise BootstrapConfigurationError(f"Invalid production configuration: {details}") from exc
 
 
+@dataclass(frozen=True)
+class MT5ReadOnlyBootstrapConfig:
+    """The narrow MT5-only counterpart to ``ProductionAdvisoryConfig``, for
+    read-only MT5 smoke tooling (``scripts/check_mt5_readonly.py``) that has
+    no legitimate need for the full production symbol/contract/market/
+    calendar configuration ``build_production_advisory_config_from_env``
+    requires. Never a ``ProductionAdvisoryConfig`` itself - constructing one
+    here would require the same Binance/calendar/market fields this type
+    exists specifically to avoid demanding."""
+
+    mt5_path: str | None
+    mt5_credentials: MT5Credentials | None
+    mt5_symbol: str
+
+
+def build_mt5_readonly_config_from_env() -> MT5ReadOnlyBootstrapConfig:
+    """Construct the smallest MT5-only configuration a read-only MT5 smoke
+    check needs: the executable symbol plus optional path/credentials.
+    Reads only ``ADVISORY_MT5_SYMBOL`` (required) and the same optional
+    ``MT5_PATH``/``MT5_LOGIN``/``MT5_PASSWORD``/``MT5_SERVER``
+    ``build_production_advisory_config_from_env`` itself reads - via the
+    same ``_build_mt5_credentials()`` helper, never a second, independent
+    credential-parsing implementation. Never requires
+    ``ADVISORY_BINANCE_SYMBOL``/``ADVISORY_CONTRACT_TYPE``/
+    ``ADVISORY_MARKET``/``MT5_ROLLOVER_TIMEZONE``/``CALENDAR_BRIDGE_PATH``/
+    ``CALENDAR_SERVER_TIMEZONE`` - none of which any read-only MT5
+    connectivity/facts check ever consults."""
+    mt5_symbol = _require_env("ADVISORY_MT5_SYMBOL")
+    mt5_path = _optional_env("MT5_PATH")
+    mt5_credentials = _build_mt5_credentials()
+    return MT5ReadOnlyBootstrapConfig(mt5_path=mt5_path, mt5_credentials=mt5_credentials, mt5_symbol=mt5_symbol)
+
+
 def build_production_advisory_service() -> ApplicationAdvisoryService:
     """Construct one ``ProductionAdvisoryComposer`` from the environment and
     wrap it in one ``ApplicationAdvisoryService``, together with the one
@@ -272,6 +306,8 @@ def build_production_advisory_service() -> ApplicationAdvisoryService:
 
 __all__ = [
     "BootstrapConfigurationError",
+    "MT5ReadOnlyBootstrapConfig",
+    "build_mt5_readonly_config_from_env",
     "build_production_advisory_config_from_env",
     "build_production_advisory_service",
 ]

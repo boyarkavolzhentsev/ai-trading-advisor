@@ -13,6 +13,7 @@ import pytest
 
 from app.bootstrap.production import (
     BootstrapConfigurationError,
+    build_mt5_readonly_config_from_env,
     build_production_advisory_config_from_env,
     build_production_advisory_service,
 )
@@ -31,29 +32,36 @@ _MINIMAL_ENV = {
 }
 
 
-def _set_minimal_env(monkeypatch: pytest.MonkeyPatch, **overrides: str | None) -> None:
-    for name in (
-        "ADVISORY_LOGICAL_SYMBOL",
-        "ADVISORY_BINANCE_SYMBOL",
-        "ADVISORY_MT5_SYMBOL",
-        "ADVISORY_CONTRACT_TYPE",
-        "ADVISORY_MARKET",
-        "MT5_ROLLOVER_TIMEZONE",
-        "CALENDAR_BRIDGE_PATH",
-        "CALENDAR_SERVER_TIMEZONE",
-        "MT5_PATH",
-        "MT5_LOGIN",
-        "MT5_PASSWORD",
-        "MT5_SERVER",
-        "ADVISORY_ROLLOVER_STATE_PATH",
-        "ADVISORY_TRACKING_DIR",
-        "ADVISORY_PROVENANCE_DIR",
-        "LLM_ENABLED",
-        "OPENAI_API_KEY",
-        "OPENAI_MODEL",
-        "OPENAI_TIMEOUT_SECONDS",
-    ):
+_ALL_ADVISORY_ENV_VARS = (
+    "ADVISORY_LOGICAL_SYMBOL",
+    "ADVISORY_BINANCE_SYMBOL",
+    "ADVISORY_MT5_SYMBOL",
+    "ADVISORY_CONTRACT_TYPE",
+    "ADVISORY_MARKET",
+    "MT5_ROLLOVER_TIMEZONE",
+    "CALENDAR_BRIDGE_PATH",
+    "CALENDAR_SERVER_TIMEZONE",
+    "MT5_PATH",
+    "MT5_LOGIN",
+    "MT5_PASSWORD",
+    "MT5_SERVER",
+    "ADVISORY_ROLLOVER_STATE_PATH",
+    "ADVISORY_TRACKING_DIR",
+    "ADVISORY_PROVENANCE_DIR",
+    "LLM_ENABLED",
+    "OPENAI_API_KEY",
+    "OPENAI_MODEL",
+    "OPENAI_TIMEOUT_SECONDS",
+)
+
+
+def _clear_all_advisory_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in _ALL_ADVISORY_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
+
+
+def _set_minimal_env(monkeypatch: pytest.MonkeyPatch, **overrides: str | None) -> None:
+    _clear_all_advisory_env(monkeypatch)
     for name, value in _MINIMAL_ENV.items():
         monkeypatch.setenv(name, value)
     for name, value in overrides.items():
@@ -291,3 +299,72 @@ def test_build_production_advisory_service_builds_without_calling_provider_metho
     _set_minimal_env(monkeypatch)
     service = build_production_advisory_service()
     assert isinstance(service, ApplicationAdvisoryService)
+
+
+# --- MT5-only read-only smoke config (scripts/check_mt5_readonly.py) -------
+
+
+def test_mt5_readonly_config_requires_only_mt5_symbol(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The whole point of ``build_mt5_readonly_config_from_env``: it must
+    succeed with ONLY ``ADVISORY_MT5_SYMBOL`` set - every Binance/calendar/
+    market/rollover-timezone variable ``build_production_advisory_config_from_env``
+    requires stays absent here, proving Phase 1 MT5 smoke tooling never needs
+    them."""
+    _clear_all_advisory_env(monkeypatch)
+    monkeypatch.setenv("ADVISORY_MT5_SYMBOL", "BTCUSDt")
+
+    config = build_mt5_readonly_config_from_env()
+
+    assert config.mt5_symbol == "BTCUSDt"
+    assert config.mt5_path is None
+    assert config.mt5_credentials is None
+
+
+def test_mt5_readonly_config_missing_symbol_fails_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_all_advisory_env(monkeypatch)
+
+    with pytest.raises(BootstrapConfigurationError, match="ADVISORY_MT5_SYMBOL"):
+        build_mt5_readonly_config_from_env()
+
+
+def test_mt5_readonly_config_optional_path_and_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_all_advisory_env(monkeypatch)
+    monkeypatch.setenv("ADVISORY_MT5_SYMBOL", "BTCUSDt")
+    monkeypatch.setenv("MT5_PATH", "C:/terminal64.exe")
+    monkeypatch.setenv("MT5_LOGIN", "12345")
+    monkeypatch.setenv("MT5_PASSWORD", "hunter2")
+    monkeypatch.setenv("MT5_SERVER", "Broker-Live")
+
+    config = build_mt5_readonly_config_from_env()
+
+    assert config.mt5_path == "C:/terminal64.exe"
+    assert config.mt5_credentials is not None
+    assert config.mt5_credentials.login == 12345
+    assert config.mt5_credentials.server == "Broker-Live"
+    assert config.mt5_credentials.password.get_secret_value() == "hunter2"
+
+
+def test_mt5_readonly_config_partial_credentials_fails_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_all_advisory_env(monkeypatch)
+    monkeypatch.setenv("ADVISORY_MT5_SYMBOL", "BTCUSDt")
+    monkeypatch.setenv("MT5_LOGIN", "12345")
+
+    with pytest.raises(BootstrapConfigurationError) as exc_info:
+        build_mt5_readonly_config_from_env()
+    message = str(exc_info.value)
+    assert "MT5_PASSWORD" in message
+    assert "MT5_SERVER" in message
+
+
+def test_mt5_readonly_config_password_never_appears_in_repr(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear_all_advisory_env(monkeypatch)
+    monkeypatch.setenv("ADVISORY_MT5_SYMBOL", "BTCUSDt")
+    monkeypatch.setenv("MT5_LOGIN", "12345")
+    monkeypatch.setenv("MT5_PASSWORD", "super-secret-password")
+    monkeypatch.setenv("MT5_SERVER", "Broker-Live")
+
+    config = build_mt5_readonly_config_from_env()
+
+    assert "super-secret-password" not in repr(config)
+    assert "super-secret-password" not in str(config)
+    assert "super-secret-password" not in repr(config.mt5_credentials)
