@@ -44,6 +44,14 @@ NOW: Timestamp = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
 SYMBOL = "BTCUSDT"
 OTHER_SYMBOL = "ETHUSDT"
+MT5_SYMBOL = "BTCUSD.m"
+"""A deliberately non-colliding fake MT5-style broker symbol for it and
+``SYMBOL`` (Binance): ``"BTCUSD.m".upper() == "BTCUSD.M" != "BTCUSDT"``. Used
+by the provider-aware symbol-scope regression tests so passing coverage can
+never again be masked by an accidental uppercase collision between a
+Binance and an MT5 symbol spelling (see the corrective review, "PROVIDER-
+AWARE SYMBOL SCOPE VALIDATION")."""
+OTHER_MT5_SYMBOL = "ETHUSD.m"
 CONTRACT_TYPE = ContractType.PERPETUAL
 OTHER_CONTRACT_TYPE = ContractType.SPOT
 
@@ -163,11 +171,13 @@ __all__ = [
     "CONTRACT_TYPE",
     "CURRENCY",
     "FLOW_DEFAULT_ANALYSTS",
+    "MT5_SYMBOL",
     "NETWORK",
     "NOW",
     "OTHER_ASSET",
     "OTHER_CONTRACT_TYPE",
     "OTHER_CURRENCY",
+    "OTHER_MT5_SYMBOL",
     "OTHER_NETWORK",
     "OTHER_SYMBOL",
     "SYMBOL",

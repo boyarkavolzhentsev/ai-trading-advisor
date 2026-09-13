@@ -135,7 +135,15 @@ def test_no_model_field_types_reference_trade_direction() -> None:
 
 def test_protocol_has_no_history_parameter() -> None:
     signature = inspect.signature(MarketEvaluationProtocol.evaluate)
-    assert set(signature.parameters) == {"self", "flow", "technical", "external", "context", "evaluation_time"}
+    assert set(signature.parameters) == {
+        "self",
+        "flow",
+        "technical",
+        "external",
+        "context",
+        "evaluation_time",
+        "expected_technical_symbol",
+    }
 
 
 def test_no_numeric_score_field_anywhere() -> None:

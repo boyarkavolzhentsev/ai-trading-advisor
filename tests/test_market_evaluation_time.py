@@ -18,6 +18,7 @@ from app.market_evaluation.errors import FutureContourTimeError
 from app.market_evaluation.evaluator import MarketEvaluator
 from tests.market_evaluation_support import (
     NOW,
+    SYMBOL,
     full_external_result,
     full_flow_result,
     full_technical_result,
@@ -30,14 +31,21 @@ MODULES = (errors, evaluator, protocols)
 def test_future_flow_raises() -> None:
     flow = full_flow_result(observation_time=NOW + timedelta(hours=1))
     with pytest.raises(FutureContourTimeError):
-        MarketEvaluator().evaluate(flow=flow, technical=None, external=None, context=make_context(), evaluation_time=NOW)
+        MarketEvaluator().evaluate(
+            flow=flow, technical=None, external=None, context=make_context(), evaluation_time=NOW, expected_technical_symbol=SYMBOL
+        )
 
 
 def test_future_technical_raises() -> None:
     technical = full_technical_result(observation_time=NOW + timedelta(hours=1))
     with pytest.raises(FutureContourTimeError):
         MarketEvaluator().evaluate(
-            flow=None, technical=technical, external=None, context=make_context(), evaluation_time=NOW
+            flow=None,
+            technical=technical,
+            external=None,
+            context=make_context(),
+            evaluation_time=NOW,
+            expected_technical_symbol=SYMBOL,
         )
 
 
@@ -45,7 +53,12 @@ def test_future_external_raises() -> None:
     external = full_external_result(analysis_time=NOW + timedelta(hours=1))
     with pytest.raises(FutureContourTimeError):
         MarketEvaluator().evaluate(
-            flow=None, technical=None, external=external, context=make_context(), evaluation_time=NOW
+            flow=None,
+            technical=None,
+            external=external,
+            context=make_context(),
+            evaluation_time=NOW,
+            expected_technical_symbol=SYMBOL,
         )
 
 
@@ -54,7 +67,12 @@ def test_equal_timestamps_are_accepted() -> None:
     technical = full_technical_result(observation_time=NOW)
     external = full_external_result(analysis_time=NOW)
     result = MarketEvaluator().evaluate(
-        flow=flow, technical=technical, external=external, context=make_context(), evaluation_time=NOW
+        flow=flow,
+        technical=technical,
+        external=external,
+        context=make_context(),
+        evaluation_time=NOW,
+        expected_technical_symbol=SYMBOL,
     )
     assert result.evaluation_time == NOW
 
@@ -65,7 +83,12 @@ def test_older_timestamps_are_accepted() -> None:
     technical = full_technical_result(observation_time=earlier)
     external = full_external_result(analysis_time=earlier)
     result = MarketEvaluator().evaluate(
-        flow=flow, technical=technical, external=external, context=make_context(), evaluation_time=NOW
+        flow=flow,
+        technical=technical,
+        external=external,
+        context=make_context(),
+        evaluation_time=NOW,
+        expected_technical_symbol=SYMBOL,
     )
     assert result.evaluation_time == NOW
 
@@ -75,7 +98,12 @@ def test_contours_need_not_share_the_same_timestamp() -> None:
     technical = full_technical_result(observation_time=NOW - timedelta(minutes=5))
     external = full_external_result(analysis_time=NOW)
     result = MarketEvaluator().evaluate(
-        flow=flow, technical=technical, external=external, context=make_context(), evaluation_time=NOW
+        flow=flow,
+        technical=technical,
+        external=external,
+        context=make_context(),
+        evaluation_time=NOW,
+        expected_technical_symbol=SYMBOL,
     )
     assert result.flow.observation_time != result.technical.observation_time
 

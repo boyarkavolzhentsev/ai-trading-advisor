@@ -93,11 +93,25 @@ def evaluation(
     technical: TechnicalSupervisorResult | None = None,
     external: ExternalIntelligenceSupervisorResult | None = None,
     context: MarketEvaluationContext | None = None,
+    expected_technical_symbol: str | None = None,
 ) -> MarketEvaluationResult:
+    """``expected_technical_symbol`` defaults to ``technical.symbol`` itself
+    when a ``technical`` result is supplied (most callers here build a
+    self-consistent ``technical`` already scoped to whatever symbol they
+    care about, e.g. a caller-chosen ``context.symbol``) - never a fixed
+    module-level default that would silently assume every caller's
+    ``technical`` uses ``SYMBOL``."""
+    if expected_technical_symbol is not None:
+        resolved_expected_technical_symbol = expected_technical_symbol
+    elif technical is not None:
+        resolved_expected_technical_symbol = technical.symbol
+    else:
+        resolved_expected_technical_symbol = SYMBOL
     return MarketEvaluator().evaluate(
         flow=flow,
         technical=technical,
         external=external,
         context=context if context is not None else make_context(),
         evaluation_time=NOW,
+        expected_technical_symbol=resolved_expected_technical_symbol,
     )

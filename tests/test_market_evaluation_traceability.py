@@ -34,7 +34,12 @@ def test_embedded_supervisors_are_the_supplied_objects() -> None:
     technical = full_technical_result()
     external = full_external_result()
     result = MarketEvaluator().evaluate(
-        flow=flow, technical=technical, external=external, context=make_context(), evaluation_time=NOW
+        flow=flow,
+        technical=technical,
+        external=external,
+        context=make_context(),
+        evaluation_time=NOW,
+        expected_technical_symbol=SYMBOL,
     )
     assert result.flow is flow
     assert result.technical is technical
@@ -46,7 +51,12 @@ def test_full_external_traceability_chain() -> None:
         (ext_analyzed_result(ExternalIntelligenceAnalystType.NEWS_SENTIMENT, symbol=SYMBOL),)
     )
     result = MarketEvaluator().evaluate(
-        flow=None, technical=None, external=external, context=make_context(symbol=SYMBOL), evaluation_time=NOW
+        flow=None,
+        technical=None,
+        external=external,
+        context=make_context(symbol=SYMBOL),
+        evaluation_time=NOW,
+        expected_technical_symbol=SYMBOL,
     )
     assert len(result.external_scope_alignment) == 1
     ref = result.external_scope_alignment[0]
@@ -78,7 +88,12 @@ def test_serialization_round_trip_preserves_traceability() -> None:
     technical = full_technical_result()
     external = full_external_result()
     result = MarketEvaluator().evaluate(
-        flow=flow, technical=technical, external=external, context=make_context(), evaluation_time=NOW
+        flow=flow,
+        technical=technical,
+        external=external,
+        context=make_context(),
+        evaluation_time=NOW,
+        expected_technical_symbol=SYMBOL,
     )
 
     payload = result.model_dump_json()

@@ -11,12 +11,20 @@ a pure, synchronous, stateless function of its input (see
 ``app.market_evaluation.protocols.MarketEvaluationProtocol``).
 
 Unlike Flow/Technical/External's own supervisors, this evaluator has no
-single shared identity anchor to validate every input against: Flow and
-Technical each anchor to one ``(symbol, contract_type)`` instrument (checked
-against the caller's ``MarketEvaluationContext``), while External
-Intelligence carries no such anchor at all - its relevance to this context is
-established scope-by-scope via exact identity matching only, never fuzzy
-matching, normalization, aliasing, or symbol parsing.
+single shared identity anchor to validate every input against: Flow anchors
+to one ``(symbol, contract_type)`` instrument checked against the caller's
+``MarketEvaluationContext`` (``context.symbol`` is, and remains, the Binance
+analytical identity - see ``MarketEvaluationContext``'s own docstring).
+Technical is a DIFFERENT provider identity space entirely (MT5 Price
+Authority Stage B/C: Technical is MT5-sourced, never Binance-sourced), so it
+is checked against the caller's own explicit ``expected_technical_symbol``
+instead - never against ``context.symbol``, which would compare an MT5
+broker symbol to a Binance symbol as though the two were required to be the
+same string (``SymbolMapping``'s own docstring: the two are "never-
+interchangeable"). External Intelligence carries no such anchor at all - its
+relevance to this context is established scope-by-scope via exact identity
+matching only, never fuzzy matching, normalization, aliasing, or symbol
+parsing.
 
 The severity fold used to compute ``overall_quality`` is a tiny, locally-
 owned copy - not imported from ``app.core.models.market_evaluation_result``
@@ -45,7 +53,7 @@ from app.core.enums.market_evaluation import (
     MarketEvaluationOutcome,
 )
 from app.core.enums.quality import FeatureQuality
-from app.core.models.base import Timestamp
+from app.core.models.base import Symbol, Timestamp
 from app.core.models.external_intelligence_supervisor_result import ExternalIntelligenceSupervisorResult
 from app.core.models.flow_supervisor_result import FlowSupervisorResult
 from app.core.models.market_evaluation_context import MarketEvaluationContext
@@ -96,7 +104,21 @@ class MarketEvaluator:
         external: ExternalIntelligenceSupervisorResult | None,
         context: MarketEvaluationContext,
         evaluation_time: Timestamp,
+        expected_technical_symbol: Symbol,
     ) -> MarketEvaluationResult:
+        """``expected_technical_symbol`` is the caller's own MT5/broker-facing
+        symbol (the same value threaded to Setup Construction as
+        ``broker_symbol``) - required unconditionally, not only when
+        ``technical`` is supplied, so a caller can never omit it by
+        forgetting ``technical`` is sometimes present. Compared against
+        ``technical.symbol`` with both sides uppercased - never a bare
+        ``==`` - so this check is correct regardless of whether the caller's
+        ``technical.symbol`` already went through
+        ``TechnicalFeatureEngine``'s own uppercase history-key normalization
+        (the real production path) or was constructed directly with its
+        original casing (a hand-built test double) - it never assumes one
+        side is pre-normalized. Never compared against ``context.symbol``,
+        which is a different provider's identity."""
         if flow is not None:
             if flow.symbol != context.symbol or flow.contract_type != context.contract_type:
                 raise ScopeMismatchError("flow result (symbol, contract_type) does not match context")
@@ -104,8 +126,10 @@ class MarketEvaluator:
                 raise FutureContourTimeError("flow.observation_time is after evaluation_time")
 
         if technical is not None:
-            if technical.symbol != context.symbol or technical.contract_type != context.contract_type:
-                raise ScopeMismatchError("technical result (symbol, contract_type) does not match context")
+            if technical.symbol.upper() != expected_technical_symbol.upper() or technical.contract_type != context.contract_type:
+                raise ScopeMismatchError(
+                    "technical result (symbol, contract_type) does not match expected_technical_symbol/context"
+                )
             if technical.observation_time > evaluation_time:
                 raise FutureContourTimeError("technical.observation_time is after evaluation_time")
 

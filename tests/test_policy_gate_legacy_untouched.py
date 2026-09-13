@@ -43,8 +43,8 @@ EXPECTED_SHA256 = {
     "app/judge/protocols.py": "a9c88a96548eded6737787dfc20d59cad9b70e928c5bb65653753a69e520283e",
     # Stage 5 production files (upstream of 6A/6B/6C, must also stay untouched)
     "app/market_evaluation/__init__.py": "cd97fcd8afc4e3da5292f8cb911c83e49b18ee313c0d9638ea4b14bed23a1e12",
-    "app/market_evaluation/evaluator.py": "2f75f6c8004647057dae8ab55fe26cb349419789d26bdea4ef779b9458a48e93",
-    "app/market_evaluation/protocols.py": "ab646e27995a979886b583dca0c01accc374cd335ba0916ee6b360edb6580cc1",
+    "app/market_evaluation/evaluator.py": "c4e38230fcf531c34db853ecf7350323d414eb1e0c0f493587eaae8647b0923a",
+    "app/market_evaluation/protocols.py": "7c6921989ffe1f7c81ff936c75784a649483e362b40d1744595f0129b23c8781",
     "app/market_evaluation/errors.py": "f17bc3f13278d2bb0251d574aeca0582df6edeb031ca49ef385a260b8001e0d6",
     # Stage 6C's own designated package marker - must not be modified by this turn
     "app/decision/__init__.py": "240d788f647b7534412b1ed29208d392cbd3d6a3276cd74c13e994a276ac6282",

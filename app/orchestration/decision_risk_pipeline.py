@@ -104,7 +104,13 @@ def evaluate_decision_risk_pipeline(
     (corrective design closure, "PROVIDER SYMBOL SPLIT + PRICE-BASIS
     RECONCILIATION", now fully MT5-native per MT5 Price Authority Stage C) -
     ``context.symbol`` remains the Binance analytical identity Stage 5 was
-    already keyed by and is never reused as the broker-facing identity.
+    already keyed by and is never reused as the broker-facing identity. The
+    same ``broker_symbol`` value is also passed to ``MarketEvaluator.evaluate``
+    as ``expected_technical_symbol`` (corrective review, "PROVIDER-AWARE
+    SYMBOL SCOPE VALIDATION"): Technical's own result is MT5-native and must
+    be validated against this MT5 identity, never against ``context.symbol``
+    - no second, independently-sourced MT5 symbol value is introduced for
+    this purpose.
 
     ``high_impact_event_context`` defaults to ``None`` - omitting it leaves
     this pipeline's behavior byte-for-byte equivalent to its pre-existing
@@ -125,6 +131,7 @@ def evaluate_decision_risk_pipeline(
         external=external,
         context=context,
         evaluation_time=evaluation_time,
+        expected_technical_symbol=broker_symbol,
     )
     strategy_router_result = StrategyRouter().route(market_evaluation=market_evaluation)
     strategy_judge_result = Judge().judge(strategy_router_result=strategy_router_result)

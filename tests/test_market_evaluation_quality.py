@@ -38,6 +38,7 @@ def _evaluate(**kwargs):
     kwargs.setdefault("external", None)
     kwargs.setdefault("context", make_context())
     kwargs.setdefault("evaluation_time", NOW)
+    kwargs.setdefault("expected_technical_symbol", SYMBOL)
     return MarketEvaluator().evaluate(**kwargs)
 
 

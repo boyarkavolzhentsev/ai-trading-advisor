@@ -12,6 +12,7 @@ from app.market_evaluation.evaluator import MarketEvaluator
 from tests.market_evaluation_support import (
     NOW,
     OTHER_SYMBOL,
+    SYMBOL,
     full_external_result,
     full_flow_result,
     full_technical_result,
@@ -25,9 +26,14 @@ from tests.market_evaluation_support import (
 )
 
 
-def _evaluate(*, flow=None, technical=None, external=None, context=None):
+def _evaluate(*, flow=None, technical=None, external=None, context=None, expected_technical_symbol=SYMBOL):
     return MarketEvaluator().evaluate(
-        flow=flow, technical=technical, external=external, context=context or make_context(), evaluation_time=NOW
+        flow=flow,
+        technical=technical,
+        external=external,
+        context=context or make_context(),
+        evaluation_time=NOW,
+        expected_technical_symbol=expected_technical_symbol,
     )
 
 
@@ -165,6 +171,7 @@ def test_no_matching_external_scope_does_not_change_outcome() -> None:
         technical=full_technical_result(symbol=OTHER_SYMBOL),
         external=full_external_result(),
         context=context,
+        expected_technical_symbol=OTHER_SYMBOL,
     )
     assert result.external_status is MarketEvaluationContourStatus.ANALYZED
     from app.core.enums.market_evaluation import ExternalAlignmentStatus

@@ -190,9 +190,9 @@ class RealTechnicalComposer:
 
 
 def _build_composer(
-    *, tmp_path: Path, technical: object, m15_market_structure: object
+    *, tmp_path: Path, technical: object, m15_market_structure: object, mt5_symbol: str = MT5_SYMBOL
 ) -> tuple[ProductionAdvisoryComposer, RuntimeCycleFakeClient, FakeRecordPersistence, FakeRecordPersistence]:
-    mapping = SymbolMapping(logical_symbol=LOGICAL_SYMBOL, binance_symbol=BINANCE_SYMBOL, mt5_symbol=MT5_SYMBOL)
+    mapping = SymbolMapping(logical_symbol=LOGICAL_SYMBOL, binance_symbol=BINANCE_SYMBOL, mt5_symbol=mt5_symbol)
     config = build_config(
         symbol_mapping=mapping,
         contract_type=BINANCE_CONTRACT_TYPE,
@@ -208,7 +208,7 @@ def _build_composer(
         account_facts=default_account_facts(as_of=AS_OF),
         positions_result=("OK", ()),
         history_deals_result=("OK", ()),
-        symbol_facts_by_symbol={MT5_SYMBOL: symbol_facts(as_of=AS_OF)},
+        symbol_facts_by_symbol={mt5_symbol: symbol_facts(symbol=mt5_symbol, as_of=AS_OF)},
     )
 
     tracking_persistence = FakeRecordPersistence()
@@ -426,3 +426,76 @@ async def test_duplicate_cycle_rejection_never_touches_mt5(tmp_path: Path) -> No
     assert trade_ids[StrategyFamily.TREND_FOLLOWING] in exc_info.value.colliding_trade_ids
     assert client.initialize_calls == 0
     assert client.shutdown_calls == 0
+
+
+# --------------------------------------------------------------------------- #
+# PROVIDER-AWARE SYMBOL SCOPE regression: deliberately non-colliding
+# binance_symbol/mt5_symbol pair (corrective review, "PROVIDER-AWARE SYMBOL
+# SCOPE VALIDATION")
+# --------------------------------------------------------------------------- #
+
+NONCOLLIDING_MT5_SYMBOL = "BTCUSD.m"
+"""Deliberately does NOT collide with BINANCE_SYMBOL under uppercasing:
+``"BTCUSD.m".upper() == "BTCUSD.M" != "BTCUSDT"`` - unlike this file's own
+module-level ``MT5_SYMBOL = "BTCUSDt"``, whose uppercase form happens to
+equal ``BINANCE_SYMBOL`` by coincidence. Proves the full production
+composition still reaches ACTIONABLE end-to-end (through the real,
+unmodified Market Evaluation scope check) once that coincidence is removed -
+this would have raised ``ScopeMismatchError`` under the pre-fix
+``technical.symbol == context.symbol`` invariant."""
+
+
+@pytest.mark.asyncio
+async def test_full_cycle_with_noncolliding_mt5_symbol_still_reaches_actionable(tmp_path: Path) -> None:
+    technical = full_technical_result(symbol=NONCOLLIDING_MT5_SYMBOL, contract_type=BINANCE_CONTRACT_TYPE)
+    m15_market_structure = usable_market_structure(
+        swings=(swing(kind=SwingKind.LOW, price=LONG_STOP_PRICE),), symbol=NONCOLLIDING_MT5_SYMBOL
+    )
+    composer, client, tracking_persistence, _provenance_persistence = _build_composer(
+        tmp_path=tmp_path, technical=technical, m15_market_structure=m15_market_structure, mt5_symbol=NONCOLLIDING_MT5_SYMBOL
+    )
+    facts = symbol_facts(symbol=NONCOLLIDING_MT5_SYMBOL, as_of=AS_OF)
+
+    await composer.startup()
+    result = await composer.run_cycle(as_of=AS_OF, trade_ids=all_trade_ids())
+
+    # 1. Cycle outcome is READY - Market Evaluation did NOT reject this
+    # cross-provider pair, even though "BTCUSD.m".upper() != "BTCUSDT".
+    assert result.outcome is ProductionAdvisoryCycleOutcome.READY
+
+    # 2. TREND_FOLLOWING still reached ACTIONABLE through the real pipeline.
+    family_result = _trend_following_result(result.runtime_cycle_result)
+    assert family_result.verdict is FinalRecommendationVerdict.ACTIONABLE
+    recommendation = family_result.recommendation
+    assert recommendation is not None
+
+    # 3. Setup Construction received exactly the MT5 symbol, never Binance/logical.
+    assert recommendation.symbol == NONCOLLIDING_MT5_SYMBOL
+    assert recommendation.symbol != BINANCE_SYMBOL
+    assert recommendation.symbol != LOGICAL_SYMBOL
+
+    # 4. Risk/sizing called client.symbol_facts() for exactly this MT5 symbol.
+    assert NONCOLLIDING_MT5_SYMBOL in client.symbol_facts_calls
+
+    # 5. RecommendationDTO preserves the exact MT5 symbol.
+    advisory_response = map_advisory_response(logical_cycle_id="test-cycle-noncolliding", cycle=result)
+    trend_dtos = [r for r in advisory_response.recommendations if r.strategy_family is StrategyFamily.TREND_FOLLOWING]
+    assert len(trend_dtos) == 1
+    assert trend_dtos[0].symbol == NONCOLLIDING_MT5_SYMBOL
+
+    # 6. AdvisoryResponse preserves the logical BTC identity, unaffected.
+    assert advisory_response.symbol == LOGICAL_SYMBOL
+
+    # 7. Entry/stop geometry remains MT5-native (no cross-venue price), unaffected
+    # by the symbol change.
+    assert recommendation.entry_price == facts.ask == Decimal("100.10")
+    assert recommendation.stop_loss == LONG_STOP_PRICE == Decimal("100")
+
+    # 8. Tracking persistence still received the write for TREND_FOLLOWING's trade_id.
+    trend_trade_id = all_trade_ids()[StrategyFamily.TREND_FOLLOWING]
+    written_trade_ids = [trade_id for trade_id, _value in tracking_persistence.write_calls]
+    assert trend_trade_id in written_trade_ids
+
+    # 9. MT5 connection lifecycle unaffected: exactly one initialize/shutdown pair.
+    assert client.initialize_calls == 1
+    assert client.shutdown_calls == 1

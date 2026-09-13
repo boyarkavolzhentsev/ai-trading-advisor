@@ -37,7 +37,9 @@ analysis instant."""
 
 
 def _evaluate(external, context):
-    return MarketEvaluator().evaluate(flow=None, technical=None, external=external, context=context, evaluation_time=NOW)
+    return MarketEvaluator().evaluate(
+        flow=None, technical=None, external=external, context=context, evaluation_time=NOW, expected_technical_symbol=SYMBOL
+    )
 
 
 # --- Individual match kinds (items 19-26) ---
@@ -212,7 +214,12 @@ def test_external_analyzed_with_no_matching_scope_is_valid() -> None:
 
 def test_alignment_status_missing_when_external_none() -> None:
     result = MarketEvaluator().evaluate(
-        flow=None, technical=None, external=None, context=make_context(), evaluation_time=NOW
+        flow=None,
+        technical=None,
+        external=None,
+        context=make_context(),
+        evaluation_time=NOW,
+        expected_technical_symbol=SYMBOL,
     )
     assert result.external_alignment_status is ExternalAlignmentStatus.MISSING
     assert result.external_scope_alignment == ()
