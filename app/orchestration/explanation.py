@@ -582,7 +582,7 @@ def render_deterministic_fallback(
         cycle_summary = "The deterministic engine produced one or more actionable recommendations this cycle."
     elif no_trade_explanation is not None:
         headline = "No trade this cycle"
-        cycle_summary = no_trade_explanation
+        cycle_summary = f"Cycle outcome: {runtime_outcome_value}."
     else:
         headline = "Runtime cycle degraded" if runtime_outcome_value == RuntimeCycleOutcome.PARTIAL_DEGRADED.value else "Runtime cycle complete"
         cycle_summary = f"Cycle outcome: {runtime_outcome_value}."

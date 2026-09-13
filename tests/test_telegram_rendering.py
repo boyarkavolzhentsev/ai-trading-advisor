@@ -282,3 +282,28 @@ def test_no_trade_huge_explanation_does_not_drop_no_trade_reasons() -> None:
     assert "EVENT_DRIVEN" in full_text
     assert "QUALITY_UNAVAILABLE" in full_text
     assert full_text.count("e") >= 9_000
+
+
+def test_no_actionable_family_explanation_not_duplicated() -> None:
+    """Regression for the live NO_TRADE duplication: the deterministic
+    fallback used to alias cycle_summary to the exact same string as
+    no_trade_explanation, so this sentence rendered twice in one Telegram
+    message. Shaped exactly like real render_deterministic_fallback output
+    for the NO_ACTIONABLE_FAMILY case (see app/orchestration/explanation.py)."""
+    no_trade_sentence = "No actionable recommendation this cycle (NO_ACTIONABLE_FAMILY)."
+    response = build_advisory_response(status=ApplicationAdvisoryStatus.NO_TRADE)
+    response = response.model_copy(
+        update={
+            "explanation": response.explanation.model_copy(
+                update={
+                    "headline": "No trade this cycle",
+                    "cycle_summary": "Cycle outcome: READY.",
+                    "no_trade_explanation": no_trade_sentence,
+                }
+            )
+        }
+    )
+
+    full_text = "\n".join(render_advisory_response(response))
+
+    assert full_text.count(no_trade_sentence) == 1

@@ -107,6 +107,11 @@ def test_fallback_business_no_trade(tmp_path: Path) -> None:
     assert fallback.no_trade_explanation is not None
     assert "NO_ACTIONABLE_FAMILY" in fallback.no_trade_explanation
     assert "Runtime cycle blocked" not in fallback.headline
+    # regression: cycle_summary must not merely alias no_trade_explanation -
+    # doing so caused the NO_ACTIONABLE_FAMILY sentence to render twice in
+    # the Telegram NO_TRADE message (once per field).
+    assert fallback.cycle_summary != fallback.no_trade_explanation
+    assert "NO_ACTIONABLE_FAMILY" not in fallback.cycle_summary
 
 
 # --- Z: deterministic fallback degraded (both shapes) ---
