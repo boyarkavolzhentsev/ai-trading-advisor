@@ -229,14 +229,31 @@ class FlowRealtimeBootstrap:
 
         self._rest_client: BinanceRestClient | None = rest_client
         self._owns_rest_client = rest_client is None
-        needs_default_rest_client = rest_client is None and (
+
+        # Two independent questions (corrective review, "FLOW REALTIME
+        # BOOTSTRAP INJECTED-REST-CLIENT WIRING"): whether a REST client must
+        # be self-constructed is never the same question as whether a
+        # default REST-backed provider must be built for the two
+        # dependencies that actually consume it. The original code
+        # conflated them into one `rest_client is None and (...)` gate, so
+        # an externally-injected `rest_client` (e.g. `ProductionAdvisory
+        # Composer`'s own shared client) with no explicit sub-providers
+        # short-circuited straight past `default_provider`'s construction,
+        # leaving `open_interest_provider`/`snapshot_fetcher` built from
+        # `None` - never triggered by this class's own test suite, which
+        # always supplies fake sub-providers alongside any injected
+        # `rest_client`, but reachable, and reached, by real production
+        # wiring the first time it ran against a live provider.
+        any_rest_backed_dependency_missing = (
             open_interest_provider is None or snapshot_fetcher is None or funding_interval_cache is None
         )
+        if self._rest_client is None and any_rest_backed_dependency_missing:
+            self._rest_client = BinanceRestClient(base_url=BINANCE_FUTURES_BASE_URL, timeout=DEFAULT_TIMEOUT_SECONDS)
+
         default_provider: BinanceFuturesMarketDataProvider | None = None
-        if needs_default_rest_client:
-            if self._rest_client is None:
-                self._rest_client = BinanceRestClient(base_url=BINANCE_FUTURES_BASE_URL, timeout=DEFAULT_TIMEOUT_SECONDS)
-            default_provider = BinanceFuturesMarketDataProvider(self._rest_client)
+        need_default_provider = open_interest_provider is None or snapshot_fetcher is None
+        if need_default_provider:
+            default_provider = BinanceFuturesMarketDataProvider(self._rest_client)  # type: ignore[arg-type]
 
         self._open_interest_provider: OpenInterestSource = (
             open_interest_provider if open_interest_provider is not None else default_provider  # type: ignore[assignment]

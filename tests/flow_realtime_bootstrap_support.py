@@ -29,6 +29,7 @@ from app.market_data.realtime.transport import WebSocketTransport
 
 __all__ = [
     "NOW",
+    "OMITTED",
     "SYMBOL",
     "FailingOpenInterestSource",
     "FakeConnection",
@@ -47,6 +48,23 @@ NOW = datetime(2026, 1, 2, 12, 0, tzinfo=UTC)
 SYMBOL = "BTCUSDT"
 
 _CLOSE_SENTINEL = object()
+
+OMITTED = object()
+"""Pass as ``open_interest_provider``/``snapshot_fetcher``/
+``funding_interval_cache`` to ``make_bootstrap`` to mean "genuinely omit
+this dependency" - i.e. let the real ``FlowRealtimeBootstrap`` constructor
+derive it itself (the production combination that masked the corrective
+review's "FLOW REALTIME BOOTSTRAP INJECTED-REST-CLIENT WIRING" bug), as
+distinct from each parameter's own default (omitting the argument entirely),
+which still means "substitute this module's own fake" - existing callers are
+unaffected."""
+
+_USE_FAKE = object()
+"""Private default sentinel for ``make_bootstrap``'s own sub-provider
+parameters - distinguishes "caller did not pass this argument at all" (use
+this module's fake) from an explicitly-passed ``OMITTED`` (pass ``None``
+through) or an explicitly-passed real object (use it directly). Never
+exported: callers only ever see ``OMITTED`` or omit the argument."""
 
 
 class FakeConnection:
@@ -175,10 +193,10 @@ def make_bootstrap(
     public_transport: WebSocketTransport | None = None,
     symbol: str = SYMBOL,
     engine: FlowFeatureEngine | None = None,
-    open_interest_provider: OpenInterestSource | None = None,
-    snapshot_fetcher=None,
+    open_interest_provider: object = _USE_FAKE,
+    snapshot_fetcher: object = _USE_FAKE,
     rest_client=None,
-    funding_interval_cache=None,
+    funding_interval_cache: object = _USE_FAKE,
     funding_cache_check_interval_seconds: float = 60.0,
     open_interest_poll_interval_seconds: float = 60.0,
 ) -> tuple[FlowRealtimeBootstrap, FakeConnection | None, FakeConnection | None]:
@@ -191,7 +209,33 @@ def make_bootstrap(
     ``*_connection``) when a test needs a transport with special connect
     behavior (e.g. one that always fails) - in that case the corresponding
     returned connection is ``None``.
+
+    ``open_interest_provider``/``snapshot_fetcher``/``funding_interval_cache``
+    each default to this module's own private "use the fake" sentinel:
+    omitting the argument entirely still substitutes this module's own fake,
+    exactly as before this sentinel existed - no existing caller's behavior
+    changes. Pass ``OMITTED`` explicitly to instead pass ``None`` straight
+    through to the real ``FlowRealtimeBootstrap`` constructor - the
+    production combination (an injected ``rest_client`` with these
+    genuinely omitted) that exercises its own default-derivation logic,
+    previously untested (corrective review, "FLOW REALTIME BOOTSTRAP
+    INJECTED-REST-CLIENT WIRING"). Pass an actual object to use it directly.
     """
+    resolved_open_interest_provider = (
+        FakeOpenInterestSource(symbol=symbol)
+        if open_interest_provider is _USE_FAKE
+        else (None if open_interest_provider is OMITTED else open_interest_provider)
+    )
+    resolved_snapshot_fetcher = (
+        default_snapshot_fetcher
+        if snapshot_fetcher is _USE_FAKE
+        else (None if snapshot_fetcher is OMITTED else snapshot_fetcher)
+    )
+    resolved_funding_interval_cache = (
+        FakeFundingIntervalCache()
+        if funding_interval_cache is _USE_FAKE
+        else (None if funding_interval_cache is OMITTED else funding_interval_cache)
+    )
     if market_transport is None:
         market_connection = market_connection if market_connection is not None else FakeConnection()
 
@@ -223,11 +267,9 @@ def make_bootstrap(
         market_transport=market_transport,
         public_transport=public_transport,
         rest_client=rest_client,
-        open_interest_provider=(
-            open_interest_provider if open_interest_provider is not None else FakeOpenInterestSource(symbol=symbol)
-        ),
-        snapshot_fetcher=snapshot_fetcher if snapshot_fetcher is not None else default_snapshot_fetcher,
-        funding_interval_cache=funding_interval_cache if funding_interval_cache is not None else FakeFundingIntervalCache(),
+        open_interest_provider=resolved_open_interest_provider,
+        snapshot_fetcher=resolved_snapshot_fetcher,
+        funding_interval_cache=resolved_funding_interval_cache,
         funding_cache_check_interval_seconds=funding_cache_check_interval_seconds,
     )
     return bootstrap, market_connection, public_connection

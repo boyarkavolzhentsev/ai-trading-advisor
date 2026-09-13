@@ -241,8 +241,21 @@ async def test_mt5_symbol_and_binance_symbol_route_independently(monkeypatch: py
 def test_default_flow_bootstrap_uses_binance_symbol_never_mt5_symbol() -> None:
     """Pure object-graph construction only - no network, no real connection.
     ``_default_flow_bootstrap`` must build its FlowRealtimeBootstrapConfig
-    from symbol_mapping.binance_symbol, never symbol_mapping.mt5_symbol."""
+    from symbol_mapping.binance_symbol, never symbol_mapping.mt5_symbol.
+
+    Also proves the corrective review, "FLOW REALTIME BOOTSTRAP INJECTED-
+    REST-CLIENT WIRING": this is the exact real production wiring pattern
+    (an explicitly-injected shared ``rest_client``, no explicit
+    ``open_interest_provider``/``snapshot_fetcher``/``funding_interval_cache``)
+    that previously left the two REST-derived dependencies built from
+    ``None`` - unreachable by ``FlowRealtimeBootstrap``'s own test suite,
+    which always supplies fakes alongside any injected ``rest_client``, but
+    reached immediately by a real live cycle. All three derived dependencies
+    must be genuinely usable, and the injected client must be reused
+    unchanged - never a second, independently-constructed ``BinanceRestClient``.
+    """
     from app.market_data.providers.binance.client import BinanceRestClient
+    from app.market_data.providers.binance.futures.provider import BinanceFuturesMarketDataProvider
     from app.production_advisory.config import SymbolMapping
     from tests.production_advisory_support import build_config
 
@@ -253,6 +266,20 @@ def test_default_flow_bootstrap_uses_binance_symbol_never_mt5_symbol() -> None:
         bootstrap = composer_module._default_flow_bootstrap(config, rest_client)
         assert bootstrap._config.symbol == "BTCUSDT"
         assert bootstrap._config.symbol != "BTCUSDt"
+
+        # No second REST client constructed - the shared, injected instance is reused.
+        assert bootstrap._rest_client is rest_client
+        assert bootstrap._owns_rest_client is False
+
+        # The two REST-derived dependencies the original bug left as None are both usable.
+        assert bootstrap._open_interest_provider is not None
+        assert isinstance(bootstrap._open_interest_provider, BinanceFuturesMarketDataProvider)
+        assert bootstrap._snapshot_fetcher is not None
+
+        # Funding was never actually broken by this bug (built directly from
+        # self._rest_client, not from the shared default_provider) - still
+        # confirmed usable for completeness.
+        assert bootstrap._funding_interval_cache is not None
     finally:
         rest_client.close()
 
