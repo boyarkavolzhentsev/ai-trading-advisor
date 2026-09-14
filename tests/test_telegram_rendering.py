@@ -9,7 +9,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.application.dto import ApplicationAdvisoryStatus, NoTradeReasonDTO, NoTradeStage
+from app.application.dto import ApplicationAdvisoryStatus, NoTradeReasonDTO, NoTradeStage, RecommendationNarrativeDTO
 from app.core.enums.strategy_router import StrategyFamily, StrategyIneligibilityReason
 from app.telegram.rendering import (
     RenderingError,
@@ -17,6 +17,7 @@ from app.telegram.rendering import (
     format_timestamp,
     pack_message_sections,
     render_advisory_response,
+    render_explanation,
     render_no_trade_reason,
     split_narrative_text,
     render_recommendation,
@@ -282,6 +283,122 @@ def test_no_trade_huge_explanation_does_not_drop_no_trade_reasons() -> None:
     assert "EVENT_DRIVEN" in full_text
     assert "QUALITY_UNAVAILABLE" in full_text
     assert full_text.count("e") >= 9_000
+
+
+# --- Stage AI-D: recommendation narrative rendering ------------------------
+
+
+def test_single_recommendation_narrative_renders_with_ai_provenance() -> None:
+    rec = build_recommendation()
+    narrative = RecommendationNarrativeDTO(
+        trade_id=rec.trade_id,
+        strategy_family=rec.strategy_family,
+        narrative="a distinctive LLM-authored narrative sentence",
+        cited_fact_ids=("rec_0.entry_price",),
+    )
+    response = build_advisory_response(status=ApplicationAdvisoryStatus.READY, recommendations=(rec,))
+    response = response.model_copy(
+        update={
+            "explanation": response.explanation.model_copy(
+                update={"deterministic_fallback_used": False, "recommendation_narratives": (narrative,)}
+            )
+        }
+    )
+
+    full_text = "\n".join(render_advisory_response(response))
+
+    assert narrative.narrative in full_text
+    assert rec.trade_id in full_text
+    assert rec.strategy_family.value in full_text
+    assert "Explanation source: AI" in full_text
+    assert "Explanation source: deterministic" not in full_text
+
+
+def test_recommendation_narrative_renders_with_deterministic_provenance() -> None:
+    rec = build_recommendation()
+    narrative = RecommendationNarrativeDTO(
+        trade_id=rec.trade_id, strategy_family=rec.strategy_family, narrative="a fixed-template fallback sentence"
+    )
+    response = build_advisory_response(status=ApplicationAdvisoryStatus.READY, recommendations=(rec,))
+    response = response.model_copy(
+        update={
+            "explanation": response.explanation.model_copy(
+                update={"deterministic_fallback_used": True, "recommendation_narratives": (narrative,)}
+            )
+        }
+    )
+
+    full_text = "\n".join(render_advisory_response(response))
+
+    assert "Explanation source: deterministic" in full_text
+    assert "Explanation source: AI" not in full_text
+
+
+def test_multiple_recommendation_narratives_preserve_order_and_labels() -> None:
+    rec_a = build_recommendation(trade_id="cyc__TREND_FOLLOWING")
+    rec_b = build_recommendation(trade_id="cyc__EVENT_DRIVEN")
+    narrative_a = RecommendationNarrativeDTO(trade_id=rec_a.trade_id, strategy_family=rec_a.strategy_family, narrative="first narrative")
+    narrative_b = RecommendationNarrativeDTO(trade_id=rec_b.trade_id, strategy_family=rec_b.strategy_family, narrative="second narrative")
+    response = build_advisory_response(status=ApplicationAdvisoryStatus.READY, recommendations=(rec_a, rec_b))
+    response = response.model_copy(
+        update={"explanation": response.explanation.model_copy(update={"recommendation_narratives": (narrative_a, narrative_b)})}
+    )
+
+    full_text = "\n".join(render_advisory_response(response))
+
+    assert full_text.count(rec_a.trade_id) >= 1
+    assert full_text.count(rec_b.trade_id) >= 1
+    assert full_text.index(narrative_a.narrative) < full_text.index(narrative_b.narrative)
+
+
+def test_cited_fact_ids_never_rendered() -> None:
+    rec = build_recommendation()
+    narrative = RecommendationNarrativeDTO(
+        trade_id=rec.trade_id,
+        strategy_family=rec.strategy_family,
+        narrative="narrative text",
+        cited_fact_ids=("a_very_distinctive_internal_fact_id_marker",),
+    )
+    response = build_advisory_response(status=ApplicationAdvisoryStatus.READY, recommendations=(rec,))
+    response = response.model_copy(
+        update={"explanation": response.explanation.model_copy(update={"recommendation_narratives": (narrative,)})}
+    )
+
+    full_text = "\n".join(render_advisory_response(response))
+
+    assert "a_very_distinctive_internal_fact_id_marker" not in full_text
+
+
+def test_no_trade_renders_no_recommendation_narrative_entries() -> None:
+    reason = NoTradeReasonDTO(strategy_family=StrategyFamily.EVENT_DRIVEN, stage=NoTradeStage.RISK, codes=(StrategyIneligibilityReason.QUALITY_UNAVAILABLE,))
+    response = build_advisory_response(status=ApplicationAdvisoryStatus.NO_TRADE, no_trade_reasons=(reason,))
+    assert response.explanation.recommendation_narratives == ()
+
+    sections_before = render_advisory_response(response)
+    full_text_before = "\n".join(sections_before)
+    assert "EVENT_DRIVEN" in full_text_before  # existing NO_TRADE rendering (reason section) unchanged
+
+    # explicit empty-tuple case renders no per-recommendation narrative entry
+    explanation_text = render_explanation(response.explanation)
+    assert explanation_text is not None
+    # only the fixed fields/provenance line can appear - never a trade_id-labeled entry (none exist here)
+    assert " — " not in explanation_text
+
+
+def test_huge_recommendation_narrative_chunks_without_dropping_recommendation() -> None:
+    rec = build_recommendation()
+    narrative = RecommendationNarrativeDTO(trade_id=rec.trade_id, strategy_family=rec.strategy_family, narrative="n" * 9_000)
+    response = build_advisory_response(status=ApplicationAdvisoryStatus.READY, recommendations=(rec,))
+    response = response.model_copy(
+        update={"explanation": response.explanation.model_copy(update={"recommendation_narratives": (narrative,)})}
+    )
+
+    chunks = pack_message_sections(render_advisory_response(response))  # must not raise
+    full_text = "".join(chunks)
+    assert rec.trade_id in full_text
+    assert full_text.count("n") >= 9_000
+    for chunk in chunks:
+        assert len(chunk) <= 4000
 
 
 def test_no_actionable_family_explanation_not_duplicated() -> None:

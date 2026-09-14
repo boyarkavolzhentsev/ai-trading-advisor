@@ -28,6 +28,7 @@ from app.application.dto import (
     ExplanationDTO,
     NoTradeReasonDTO,
     RecommendationDTO,
+    RecommendationNarrativeDTO,
 )
 
 _DEFAULT_MAX_CHUNK_SIZE = 4000
@@ -112,10 +113,30 @@ def render_degraded_diagnostics(response: AdvisoryResponse) -> str:
     return "\n".join(lines)
 
 
+def _render_recommendation_narrative(narrative: RecommendationNarrativeDTO) -> str:
+    """One labeled narrative entry - never the raw ``cited_fact_ids`` (an
+    internal audit/validation detail, already enforced server-side, of no
+    value to a Telegram reader) and never reinterpreted/parsed, only ever
+    displayed as inert text (see this module's own no-Markdown/HTML
+    docstring guarantee)."""
+    return f"{narrative.trade_id} — {narrative.strategy_family.value}\n{narrative.narrative}"
+
+
 def render_explanation(explanation: ExplanationDTO) -> str | None:
     """Presentation only - never able to alter direction/entry/stop/TP/
     volume/risk/whether a recommendation exists. Returns ``None`` (no
-    section) when there is nothing to show."""
+    section) when there is nothing to show.
+
+    ``recommendation_narratives`` are appended here, inside this same
+    narrative section - never as their own ``render_advisory_response``
+    section - so they flow through ``split_narrative_text``'s existing
+    never-raises chunking exactly like ``cycle_summary``/``warnings`` already
+    do, and so they can never precede/displace an authoritative
+    ``render_recommendation`` block (those are appended to ``sections``
+    before this function is ever called - see ``render_advisory_response``).
+    The one-line provenance tag makes explanation source (AI vs
+    deterministic fallback) visible without repeating it per recommendation.
+    """
     lines: list[str] = []
     if explanation.headline:
         lines.append(explanation.headline)
@@ -123,6 +144,9 @@ def render_explanation(explanation: ExplanationDTO) -> str | None:
         lines.append(explanation.cycle_summary)
     if explanation.no_trade_explanation:
         lines.append(explanation.no_trade_explanation)
+    lines.append("Explanation source: deterministic" if explanation.deterministic_fallback_used else "Explanation source: AI")
+    if explanation.recommendation_narratives:
+        lines.extend(_render_recommendation_narrative(narrative) for narrative in explanation.recommendation_narratives)
     if explanation.warnings:
         lines.append("Warnings: " + "; ".join(explanation.warnings))
     if explanation.risk_notes:
