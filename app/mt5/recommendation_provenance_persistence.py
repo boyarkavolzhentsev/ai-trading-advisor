@@ -97,13 +97,22 @@ class MT5RecommendationProvenancePersistence:
     def write(self, trade_id: str, provenance: FinalRecommendationProvenance) -> bool:
         """Atomic write: temp file, flush, fsync, ``os.replace``. A failure
         at any step leaves the existing valid file (if any) untouched and
-        cleans up the temp file where safely possible."""
+        cleans up the temp file where safely possible.
+
+        Creates ``self._directory`` (and any missing parents) on demand,
+        here rather than in ``__init__`` - so construction stays I/O-free
+        (mirrors this repository's own established "no I/O at construction"
+        convention) and a directory-creation failure (invalid/unwritable
+        configured path) degrades this one write to ``False`` exactly like
+        any other write failure, never an uncaught exception at startup.
+        ``exist_ok=True`` makes this safe under concurrent callers."""
         path = self._path_for(trade_id)
         if path is None:
             return False
 
         tmp_path = path.with_name(path.name + ".tmp")
         try:
+            self._directory.mkdir(parents=True, exist_ok=True)
             with tmp_path.open("w", encoding="utf-8") as handle:
                 handle.write(provenance.model_dump_json())
                 handle.flush()

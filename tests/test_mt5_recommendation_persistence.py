@@ -93,6 +93,25 @@ def test_failed_replace_preserves_existing_valid_file(store: MT5RecommendationPe
 # --- stable trade_id path behavior ---
 
 
+def test_write_creates_missing_parent_directory(tmp_path: Path) -> None:
+    store = MT5RecommendationPersistence(tmp_path / "missing" / "tracking")
+    assert store.write("trade-1", default_tracked_recommendation()) is True
+    assert (tmp_path / "missing" / "tracking" / "trade-1.json").exists()
+    assert not (tmp_path / "missing" / "tracking" / "trade-1.json.tmp").exists()
+
+
+def test_write_returns_false_when_path_blocked_by_existing_file(tmp_path: Path) -> None:
+    blocker = tmp_path / "blocked"
+    blocker.write_text("not a directory", encoding="utf-8")
+    store = MT5RecommendationPersistence(blocker / "tracking")
+
+    assert store.write("trade-1", default_tracked_recommendation()) is False
+
+    assert not (blocker / "tracking").exists()
+    assert not (blocker / "tracking" / "trade-1.json").exists()
+    assert not (blocker / "tracking" / "trade-1.json.tmp").exists()
+
+
 def test_unsafe_trade_id_with_path_separator_rejected_on_write(store: MT5RecommendationPersistence) -> None:
     assert store.write("../escape", default_tracked_recommendation()) is False
 

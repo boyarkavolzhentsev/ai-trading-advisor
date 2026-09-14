@@ -136,6 +136,44 @@ def test_full_happy_path_hedging_issues_and_persists(tmp_path: Path) -> None:
     assert persisted_provenance.family is StrategyFamily.TREND_FOLLOWING
 
 
+def test_actionable_issuance_persists_when_initial_directories_are_missing(tmp_path: Path) -> None:
+    """Regression for the live AI-F persistence incident: unlike
+    ``_make_stores`` (which pre-creates ``tracking_dir``), this test points
+    the REAL ``MT5RecommendationPersistence``/``MT5RecommendationProvenancePersistence``
+    at fresh subdirectories nobody has created yet - proving a fresh
+    deployment/config path (e.g. a never-before-used ``ADVISORY_TRACKING_DIR``/
+    ``ADVISORY_PROVENANCE_DIR``) no longer silently degrades an otherwise-
+    successful actionable issuance merely because the directory did not
+    already exist."""
+    fresh_tracking_dir = tmp_path / "fresh" / "tracking"
+    fresh_provenance_dir = tmp_path / "fresh" / "provenance"
+    assert not fresh_tracking_dir.exists()
+    assert not fresh_provenance_dir.exists()
+
+    rollover_persistence = MT5RolloverStatePersistence(tmp_path / "rollover.json")
+    tracking_persistence = MT5RecommendationPersistence(fresh_tracking_dir)
+    provenance_persistence = MT5RecommendationProvenancePersistence(fresh_provenance_dir)
+
+    client = _actionable_client(account_facts=default_account_facts(margin_mode=AccountPositionMode.HEDGING))
+    result, _, tracking_persistence, provenance_persistence = _run_cycle(
+        tmp_path, client, stores=(rollover_persistence, tracking_persistence, provenance_persistence)
+    )
+
+    assert len(result.new_tracking_persistence_outcomes) == 1
+    outcome = result.new_tracking_persistence_outcomes[0]
+    assert outcome.tracking_creation_outcome is MT5TrackedRecommendationCreationOutcome.CREATED
+    assert outcome.tracking_persisted is True
+    assert outcome.provenance_persisted is True
+    assert result.outcome is RuntimeCycleOutcome.READY  # not PARTIAL_DEGRADED
+
+    assert fresh_tracking_dir.exists()
+    assert fresh_provenance_dir.exists()
+    _, persisted_tracked = tracking_persistence.read("trade-1")
+    assert persisted_tracked is not None
+    _, persisted_provenance = provenance_persistence.read("trade-1")
+    assert persisted_provenance is not None
+
+
 def test_shutdown_always_called_on_happy_path(tmp_path: Path) -> None:
     client = _actionable_client()
     _run_cycle(tmp_path, client)

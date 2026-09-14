@@ -107,6 +107,25 @@ def test_failed_replace_preserves_existing_valid_file(
 # --- stable trade_id path behavior ---
 
 
+def test_write_creates_missing_parent_directory(tmp_path: Path) -> None:
+    store = MT5RecommendationProvenancePersistence(tmp_path / "missing" / "provenance")
+    assert store.write("trade-1", _provenance()) is True
+    assert (tmp_path / "missing" / "provenance" / "trade-1.provenance.json").exists()
+    assert not (tmp_path / "missing" / "provenance" / "trade-1.provenance.json.tmp").exists()
+
+
+def test_write_returns_false_when_path_blocked_by_existing_file(tmp_path: Path) -> None:
+    blocker = tmp_path / "blocked"
+    blocker.write_text("not a directory", encoding="utf-8")
+    store = MT5RecommendationProvenancePersistence(blocker / "provenance")
+
+    assert store.write("trade-1", _provenance()) is False
+
+    assert not (blocker / "provenance").exists()
+    assert not (blocker / "provenance" / "trade-1.provenance.json").exists()
+    assert not (blocker / "provenance" / "trade-1.provenance.json.tmp").exists()
+
+
 def test_unsafe_trade_id_with_path_separator_rejected_on_write(store: MT5RecommendationProvenancePersistence) -> None:
     assert store.write("../escape", _provenance()) is False
 
