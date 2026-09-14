@@ -102,6 +102,52 @@ flowchart TD
    anything produced in steps 1-7.
 10. The response is returned to Telegram or the API caller.
 
+## Example output
+
+*Synthetic example - values are fabricated for illustration. Not a real bot
+output; no real cycle/trade id, price, volume, or account fact.*
+
+**Example A - NO_TRADE:**
+
+```
+Symbol: BTC
+Status: NO_TRADE
+
+NO TRADE
+
+TREND_FOLLOWING — JUDGE: MIXED
+MEAN_REVERSION — JUDGE: INSUFFICIENT_EVIDENCE
+BREAKOUT — JUDGE: MIXED
+
+No actionable strategy family was identified.
+Explanation source: AI
+```
+
+**Example B - actionable recommendation:**
+
+```
+Symbol: BTC
+Status: READY
+
+BREAKOUT
+Symbol: BTCUSDt
+Direction: LONG
+Entry: 50000.00
+Stop: 49500.00
+Take-profit: 51000.00
+Volume: 0.10
+Approved risk: 50.00 USD
+
+Explanation source: AI
+Breakout conditions were supported by the deterministic market and risk pipeline.
+```
+
+Both examples are synthetic illustrations of the response shape only - not a
+claim that any order was placed, and not a claim of profitability. See
+[Deterministic authority vs. LLM explanation](#deterministic-authority-vs-llm-explanation)
+and [Safety boundary](#safety-boundary) below for what these fields actually
+mean and who is allowed to produce them.
+
 ## Deterministic authority vs. LLM explanation
 
 This is the core safety property of the system.
@@ -179,6 +225,8 @@ app/
   api/                    FastAPI app, routes, models
   bootstrap/              environment/config loading for production
 scripts/                  manual live checks (not part of the test suite)
+mql5/                     MT5-side economic-calendar bridge (read-only; no
+                          OrderSend/trading of any kind) feeding CALENDAR_BRIDGE_PATH
 tests/
 ```
 

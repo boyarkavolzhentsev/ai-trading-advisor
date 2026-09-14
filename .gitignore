@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local runtime persistence (tracking/provenance/cycle receipts/rollover state)
+/data/
